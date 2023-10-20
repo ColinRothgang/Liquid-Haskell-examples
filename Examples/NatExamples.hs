@@ -417,16 +417,46 @@ divN m n
             | m `eqN` n = one
             | otherwise = Z
 
--- n > S (m mod n) => (S (m - n) div n == (m - n) div n) => S m div n == m div n
+-- | Lemma: m >= n => m / n == S ((m - n) / n)
+{-@ subt_div :: m: N -> {n: N | n != Z && geqN m n} -> {Suc (divN (subt m n) n) == divN m n} @-}
+subt_div :: N -> N -> Proof
+subt_div m n 
+            | m `geN` n && m `geqN` n = trivial
+            | m `eqN` n = subt_self m n
+            | m `leN` n = le_geq m n
+            | otherwise = geqN_geN_eqN m n
+
+-- n > S (m mod n) => (S (m - n) / n == (m - n) / n) && m > n => S (m - n) / n == (m - n) / n => S m / n = m / n
 {-@ divN_suc_1_ge_concl:: m: N -> {n:N | n != Z && geN n (Suc (modN m n)) && divN (Suc (subt m n)) n = divN (subt m n) n && geN m n && geqN m n} -> {divN (Suc (subt m n)) n = divN (subt m n) n => divN (Suc m) n = divN m n} @-}
 divN_suc_1_ge_concl :: N -> N -> Proof
-divN_suc_1_ge_concl m n = trivial
+divN_suc_1_ge_concl m n =                           m `divN` n
+                        ? subt_div m n          === Suc ((m `subt` n) `divN` n)     
+                                                === Suc ((Suc (m `subt` n)) `divN` n)   
+    ? geqN_suc_l m n    ? subt_suc_l m n        === Suc (((Suc m) `subt` n) `divN` n)
+    ? geqN_suc_l m n    ? subt_div (Suc m) n    === (Suc m) `divN` n    *** QED
 
+-- n  != Z && n > S (m mod n) && m == n => n >  S (m - n mod n)
+{-@ divN_suc_1_eq_ass:: m: N -> {n:N | n != Z && geN n (Suc (modN m n)) && eqN m n} -> {geN n (Suc (modN (subt m n) n))} @-}
+divN_suc_1_eq_ass :: N -> N -> Proof
+divN_suc_1_eq_ass m n = Suc (m `modN` n) ? eq_geq m n   ? subt_mod m n  === Suc ((m `subt` n) `modN` n)
+                                                        ? subt_self m n === Suc (Z `modN` n)
+                                                                        === one *** QED
+
+-- n > S (m mod n) => (S (m - n) / n == (m - n) / n) && m == n => S m / n = m / n
+{-@ divN_suc_1_eq_concl:: m: N -> {n:N | n != Z && geN n (Suc (modN m n)) && divN (Suc (subt m n)) n = divN (subt m n) n && eqN m n} -> {divN (Suc (subt m n)) n = divN (subt m n) n => divN (Suc m) n = divN m n} @-}
+divN_suc_1_eq_concl :: N -> N -> Proof
+divN_suc_1_eq_concl m n =                           m `divN` n
+    ? eq_geq m n        ? subt_div m n          === Suc ((m `subt` n) `divN` n)
+                                                === Suc ((Suc (m `subt` n)) `divN` n)   
+    ? geqN_suc_l m n    ? subt_suc_l m n        === Suc (((Suc m) `subt` n) `divN` n)
+    ? geqN_suc_l m n    ? subt_div (Suc m) n    === (Suc m) `divN` n    *** QED
+
+-- n > S (m mod n) => S m / n == m / n
 {-@ divN_suc_1:: m: N -> {n:N | n != Z && geN n (Suc (modN m n))} -> {divN (Suc m) n = divN m n} @-}
 divN_suc_1 :: N -> N -> Proof
 divN_suc_1 m n 
             | m `geN` n  && m `geqN` n  = divN_suc_1 (subt m n) n ? subt_mod m n ? divN_suc_1_ge_concl m n
-            | m `eqN` n = trivial
+            | m `eqN` n = divN_suc_1 (subt m n) n ? divN_suc_1_eq_ass m n ? divN_suc_1_eq_concl m n
             | Suc m `eqN` n = trivial
             | otherwise  = trivial
 
