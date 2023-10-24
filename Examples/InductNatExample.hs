@@ -5,7 +5,7 @@
 
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE PackageImports #-}
-module NatExamples where
+module InductNatExample where
 
 {- HLINT ignore -}
 import Language.Haskell.Liquid.ProofCombinators
