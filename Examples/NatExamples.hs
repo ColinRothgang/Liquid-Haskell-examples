@@ -1,6 +1,6 @@
 {-@ LIQUID "--ple" @-}
 {-@ LIQUID "--reflection" @-}
-{-@ LIQUID "--diff" @-}
+-- {-@ LIQUID "--diff" @-}
 -- {-# LANGUAGE GADTs #-}
 
 {-# LANGUAGE NoImplicitPrelude #-}
@@ -99,31 +99,56 @@ one = Suc Z
 two = Suc one
 
 -- | Multiplication with right one
-{-@ mult_one_r :: n:N -> {mult n one = n} @-}
+{-@ mult_one_r :: n:N -> {mult n one == n} @-}
 mult_one_r :: N -> Proof
 mult_one_r Z    = trivial
 mult_one_r (Suc n) = mult_one_r n
 
 -- | Multiplication with left one
-{-@ mult_one_l :: n: N -> {mult one n = n} @-}
+{-@ mult_one_l :: n: N -> {mult one n == n} @-}
 mult_one_l :: N -> Proof
 mult_one_l n = add_zero_r n 
 
 -- | Addition distributes over right multiplication
-{-@ add_dist_rmult:: m: N -> n: N -> o: N -> {mult (add m n) o = add (mult m o) (mult n o) } @-}
+{-@ add_dist_rmult:: m: N -> n: N -> o: N -> {mult (add m n) o == add (mult m o) (mult n o) } @-}
 add_dist_rmult :: N -> N -> N -> Proof
 add_dist_rmult Z _ _ = trivial
 add_dist_rmult (Suc m) n o = add_dist_rmult m n o ? add_assoc o (mult m o) (mult n o)
 
 
 -- | Addition distributes over left multiplication
-{-@ add_dist_lmult:: m: N -> n: N -> o: N -> {mult m (add n o) = add (mult m n) (mult m o) } @-}
+{-@ add_dist_lmult:: m: N -> n: N -> o: N -> {mult m (add n o) == add (mult m n) (mult m o) } @-}
 add_dist_lmult :: N -> N -> N -> Proof
 add_dist_lmult m Z _ = mult_zero_r m
 add_dist_lmult m (Suc n) o  = mult_suc_r m (add n o) 
                             ? add_dist_lmult m n o 
                             ? add_assoc m (mult m n) (mult m o) 
                             ? mult_suc_r m n
+
+{-@ mult_assoc :: m: N -> n: N -> o: N -> {mult (mult m n) o == mult m (mult n o)} @-}
+mult_assoc :: N -> N -> N -> Proof
+mult_assoc Z _ _ = trivial
+-- mult_assoc m Z o = add_zero_r m
+-- mult_assoc m n Z = add_zero_r n ? add_zero_r (add m n)
+mult_assoc (Suc m) n o =                    mult (mult (Suc m) n) o 
+                                        === (n `add` (mult m n)) `mult` o
+        ? add_dist_rmult n (mult m n) o === (n `mult` o) `add` ((m `mult` n) `mult` o)
+        ? mult_assoc m n o              === (n `mult` o) `add` (m `mult` (n `mult` o))
+                                        === (Suc m) `mult` (mult n o)           *** QED
+
+{-@ add_mono_r :: m: N -> n: N -> {geqN (add m n) m && (geN n Z => geN (add m n) m)}  @-}
+add_mono_r :: N -> N -> Proof
+add_mono_r Z n = trivial
+add_mono_r (Suc m) n = add_suc_l m n ? add_mono_r m n
+
+{-@ add_mono_l :: m: N -> n: N -> {geqN (add m n) n && (geN m Z => geN (add m n) n)}  @-}
+add_mono_l :: N -> N -> Proof
+add_mono_l m n = add_mono_r n m ? add_comm n m
+
+{-@ mult_zero :: m: N -> n: N -> {m != Z && n != Z => geqN (mult m n) n} @-}
+mult_zero :: N -> N -> Proof
+mult_zero Z _ = trivial
+mult_zero (Suc m) n = ((Suc m) `mult` n ? mult_suc_l m n === n `add` (m `mult` n) ? add_comm n (mult m n) === (m `mult` n) `add` n *** QED) ? ge_zero n ? add_mono_l (m `mult` n) n ? ge_geq ((m `mult` n) `add` n) n
 
 -- | Equality of natural numbers
 {-@ reflect eqN @-}
@@ -189,7 +214,11 @@ ge_measure Z _ = trivial
 ge_measure (Suc _) Z = trivial
 ge_measure (Suc m) (Suc n) = ge_measure m n
 
-{-@ ge_geq_suc :: m: N -> n: N -> { geN m n == geqN m (Suc n)} @-}
+{-@ ge_zero :: n : N -> {geqN n Z && n != Z => geN n Z} @-}
+ge_zero Z = trivial
+ge_zero (Suc n) = ge_zero n ? ge_geq_suc n Z
+
+{-@ ge_geq_suc :: m: N -> n: N -> { geN m n <=> geqN m (Suc n)} @-}
 ge_geq_suc :: N -> N -> Proof
 ge_geq_suc Z _ = trivial
 ge_geq_suc (Suc m) Z = trivial
@@ -521,6 +550,18 @@ divN_one m n
             | m `eqN` n = m `divN` n === one *** QED
             | otherwise = trivial    
 
+{-@ div_mult :: m: N -> {n: N | n != Z} -> {divN (mult m n) n == m} @-}
+div_mult Z (Suc n) = mult_zero_l (Suc n) ? divN_zero Z (Suc n)
+div_mult (Suc m) n =                                        ((Suc m) `mult` n) `divN` n
+                                                        === (n `add` (m `mult` n)) `divN` n
+        ? mult_zero m n ? add_mono_r n (m `mult` n) 
+        ? add_mono_r (n `add` (m `mult` n)) n ? divN_subt (n `add` (m `mult` n)) n 
+                                                        === Suc (((n `add` (m `mult` n)) `subt` n) `divN` n)
+        ? add_comm n (m `mult` n)                       === Suc ((((m `mult` n) `add` n) `subt` n) `divN` n)
+        ? add_subt (m `mult` n) n                       === Suc ((m `mult` n) `divN` n)
+        ? div_mult m n                                  === Suc m                                   *** QED
+
+
 -- n > S (m mod n) => (S (m - n) / n == (m - n) / n) && m > n => S (m - n) / n == (m - n) / n => S m / n = m / n
 {-@ divN_suc_1_ge_concl:: m: N -> {n:N | n != Z && geN n (Suc (modN m n)) && divN (Suc (subt m n)) n = divN (subt m n) n && geqN m n} -> {divN (Suc (subt m n)) n = divN (subt m n) n => divN (Suc m) n = divN m n} @-}
 divN_suc_1_ge_concl :: N -> N -> Proof
@@ -630,12 +671,6 @@ divides_exists m n =                    n
                 ? divides_def m n   === Z `add` ((n `divN` m) `mult` m)
                                     === (n `divN` m) `mult` m           *** QED
 
-{-@ divides_exists_impl :: {m:N | m != Z} -> n:N -> {divides m n => mult (divN n m) m == n} @-}
-divides_exists_impl:: N -> N -> Proof
-divides_exists_impl m n 
-                | divides m n = divides_exists m n
-                | otherwise = trivial
-
 {-@ exists_divides_lem :: {m:N | m != Z} -> {n:N | mult (divN n m) m == n} -> {add (modN n m) (mult (divN n m) m) == mult (divN n m) m} @-}
 exists_divides_lem :: N -> N -> Proof
 exists_divides_lem m n =            (n `modN` m) `add` ((n `divN` m) `mult` m)
@@ -651,15 +686,12 @@ exists_divides m n =                                        (Z
                                                         === ((n `modN` m) `add` ((n `divN` m) `mult` m)) `subt` ((n `divN` m) `mult` m)
         ? add_subt (n `modN` m) ((n `divN` m) `mult` m) === n `modN` m              *** QED) ? divides_def m n
 
-{-@ exists_divides_impl :: {m:N | m != Z} -> n:N -> {mult (divN n m) m == n => divides m n} @-}
-exists_divides_impl:: N -> N -> Proof
-exists_divides_impl m n 
-                | (n `divN` m) `mult` m == n = exists_divides m n
-                | otherwise = trivial
-
 {-@ divides_def_exists :: {m:N | m != Z} -> n:N -> {divides m n <=> mult (divN n m) m == n} @-}
 divides_def_exists :: N -> N -> Proof
-divides_def_exists m n = divides_exists_impl m n ? exists_divides_impl m n
+divides_def_exists m n 
+                | (n `divN` m) `mult` m == n = exists_divides m n
+                | divides m n = divides_exists m n
+                | otherwise = trivial
 
 {-@ divides_self :: {n:N | n != Z} -> {divides n n} @-}
 divides_self :: N -> Proof
@@ -675,9 +707,27 @@ divides_zero n = (Z `modN` n     === Z   *** QED) ? divides_def n Z
 divides_eqN :: N -> N -> Proof
 divides_eqN m n = eq_equal m n ? divides_self m
 
-{-@ divides_mod :: m:N -> n:N -> {o: N | o != Z && divides o n && divides o (modN m n)} -> {mult (divN m o) o == m} @-}
+{-@ divides_mod_eqs :: m:N -> {n:N | n != Z} -> {o: N | o != Z && mult (divN n o) o == n && mult (divN (modN m n) o) o == (modN m n)} -> {mult (add (mult (divN m n) (divN n o)) (divN (modN m n) o)) o == m} @-}
+divides_mod_eqs :: N -> N -> N -> Proof
+divides_mod_eqs m n o = mult (add (mult (divN m n) (divN n o)) (divN (modN m n) o)) o ==! m *** QED
+
+
+{-@ divides_mod_ass :: m:N -> {n:N | n != Z} -> {o: N | o != Z && mult (divN n o) o == n && mult (divN (modN m n) o) o == (modN m n)} -> {add (mult (divN m n) (divN n o)) (divN (modN m n) o) == divN m o} @-}
+divides_mod_ass :: N -> N -> N -> Proof
+divides_mod_ass m n o =                                                     m `divN` o
+                                                ? divides_mod_eqs m n o === ((add (mult (divN m n) (divN n o)) (divN (modN m n) o)) `mult` o) `divN` o
+    ? div_mult (add (mult (divN m n) (divN n o)) (divN (modN m n) o)) o === add (mult (divN m n) (divN n o)) (divN (modN m n) o)                *** QED
+
+{-@ divides_mod_concl :: m:N -> {n:N | n != Z} -> {o: N | o != Z && mult (divN n o) o == n && mult (divN (modN m n) o) o == (modN m n)} -> {mult (divN m o) o == m} @-}
+divides_mod_concl :: N -> N -> N -> Proof
+divides_mod_concl m n o =               (m `divN` o) `mult` o
+        ? divides_mod_ass m n o     === (((m `divN` n) `mult` (n `divN` o)) `add` ((m `modN` n) `divN` o)) `mult` o
+        ? divides_mod_eqs m n o     === m                                                                   *** QED
+
+
+{-@ divides_mod :: m:N -> {n:N | n != Z} -> {o: N | o != Z && divides o n && divides o (modN m n)} -> {divides o m} @-}
 divides_mod :: N -> N -> N -> Proof
-divides_mod m n o = ((m `divN` o) `mult` o ==! m *** QED) ? divides_def_exists o m
+divides_mod m n o = divides_def_exists o n ? divides_def_exists o (m `modN` n) ? divides_mod_concl m n o ? divides_def_exists o m
 
 {-@ reflect gcdN @-}
 {-@ gcdN :: m:N -> n:N -> {o: N | o != Z} / [toInt m + toInt n] @-} -- {o: N | (geN m n && m != Z && n != Z => (toInt o < toInt m && toInt o < toInt n)) && (leN m n && m != Z && n != Z => (toInt o < toInt m && toInt o < toInt n))}
@@ -691,6 +741,36 @@ gcdN m n
             | m `leN` n && toInt (n `modN` m) < toInt n = gcdN m (n `modN` m)
             | otherwise = one
 
+{-@ gcd_def_ge :: m:N -> n:N -> {geN m n && n != Z => gcdN m n == gcdN (modN m n) n} @-}
+gcd_def_ge :: N -> N -> Proof
+gcd_def_ge Z _ = trivial
+gcd_def_ge m Z = trivial
+gcd_def_ge m n 
+            | m `geN` n = termination_cases_lemma m n ? (gcdN m n === gcdN (m `modN` n) n *** QED)
+            | m `eqN` n = geN_irreflexive m n
+            | m `leN` n = geN_anti_comm m n
+            | otherwise = ge_eq_le_exhaustive m n
+
+{-@ gcd_def_le :: m:N -> n:N -> {leN m n && m != Z => gcdN m n == gcdN m (modN n m)} @-}
+gcd_def_le :: N -> N -> Proof
+gcd_def_le Z _ = trivial
+gcd_def_le m Z = trivial
+gcd_def_le m n 
+            | m `geN` n = geN_anti_comm n m
+            | m `eqN` n = geN_irreflexive m n
+            | m `leN` n = termination_cases_lemma n m ? (gcdN m n === gcdN m (n `modN` m) *** QED)
+            | otherwise = ge_eq_le_exhaustive m n
+
+{-@ gcd_symm :: m:N -> n:N -> {gcdN m n == gcdN n m} / [toInt m + toInt n] @-}
+gcd_symm :: N -> N -> Proof
+gcd_symm Z Z = trivial
+gcd_symm Z n = trivial
+gcd_symm m Z = trivial
+gcd_symm m n 
+            | m `geN` n = termination_cases_lemma m n ? (gcdN m n === gcdN (m `modN` n) n ? gcd_symm (m `modN` n) n === gcdN n (m `modN` n) ? gcd_def_le n m === gcdN n m *** QED)
+            | m `eqN` n = eq_equal m n
+            | m `leN` n = termination_cases_lemma n m ? (gcdN m n === gcdN m (n `modN` m) ? gcd_symm m (n `modN` m) === gcdN (n `modN` m) m ? gcd_def_ge n m === gcdN n m *** QED)
+            | otherwise = ge_eq_le_exhaustive m n
 
 
 {-@ termination_cases_lemma :: m:N -> {n:N | n != Z && geN m n} -> {toInt (modN m n) < toInt m} @-}
@@ -721,17 +801,18 @@ gcdN_le m n
             | m `leN` n = gcdN m n ? termination_cases_lemma n m === gcdN m (modN n m)   *** QED
             | otherwise = trivial
 
--- {-@ gcd_post_1_lemma :: m:N -> {n:N | n != Z && geN m n && } -> {divides (gcdN m n) m && divides (gcdN m n) n} @-}
--- gcd_post_1_lemma :: N -> N -> Proof
--- gcd_post_1_lemma m n = termination_cases_lemma m n ? gcd_post_1 (m `modN` n) n ? gcdN_ge m n ? divides_mod m n (gcdN m n)
+{-@ gcd_post_1_lemma :: m:N -> {n:N | (gcdN m n) != Z && geN m n && n != Z && toInt (modN m n) < toInt m && (gcdN (modN m n) n != Z => (divides (gcdN (modN m n) n) (modN m n) && divides (gcdN (modN m n) n) n))} -> {divides (gcdN m n) m && divides (gcdN m n) n} @-}
+gcd_post_1_lemma :: N -> N -> Proof
+gcd_post_1_lemma m n = gcdN_ge m n ? divides_mod m n (gcdN m n)
 
-{-@ gcd_post_1 :: m:N -> n:N -> {gcdN m n != Z => (divides (gcdN m n) m && divides (gcdN m n) n)} @-}
+{-@ gcd_post_1 :: m:N -> n:N -> {gcdN m n != Z => (divides (gcdN m n) m && divides (gcdN m n) n)} / [toInt m + toInt n] @-}
 gcd_post_1 :: N -> N -> Proof
 gcd_post_1 Z Z = one === gcdN Z Z *** QED
 gcd_post_1 m Z = (m === gcdN m Z *** QED) ? divides_zero m ? divides_self m
 gcd_post_1 Z n = (n === gcdN Z n *** QED) ? divides_zero n ? divides_self n
 gcd_post_1 m n 
-            | m `geN` n = termination_cases_lemma m n ? gcd_post_1 (m `modN` n) n ? gcdN_ge m n ? divides_mod m n (gcdN m n)
+            | gcdN m n == Z = trivial
+            | m `geN` n = termination_cases_lemma m n ? gcd_post_1 (m `modN` n) n ? gcd_post_1_lemma m n
             | m `eqN` n = divides_eqN m n
-            | m `leN` n = termination_cases_lemma n m ? gcd_post_1 m (n `modN` m) ? divides_mod m n (gcdN n m) ? gcdN_le m n
+            | m `leN` n = termination_cases_lemma n m ? gcd_post_1 m (n `modN` m) ? gcd_symm m n ? gcd_post_1_lemma n m
             | otherwise = ge_eq_le_exhaustive m n
