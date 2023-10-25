@@ -10,6 +10,11 @@ cabal-dev
 *.dyn_hi
 .hpc
 .hsenv
+*.aux
+*.glob
+*.vo
+*.vok
+*.vos
 .cabal-sandbox/
 cabal.sandbox.config
 *.prof
