@@ -10,7 +10,7 @@ build-type:     Simple
 
 library
   exposed-modules:
-      NatExamples
+      InductNatExample
   other-modules:
       Paths_Liquid_Haskell_examples
   hs-source-dirs:
