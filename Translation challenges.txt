@@ -1,0 +1,18 @@
+Differences between LH and Coq that cause translation challenges:
+
+Big and hard problems:
+1. LH uses recursion, Coq mostly induction
+	- easy recursive functions 																																	-> inductive functions ("Fixpoints")
+	- complicated recursive functions 																													-> Equations
+	- function definition/proofs by recursion and matching on inductive constructors						-> inductive proofs, much simpler and preferable to Equations whenever possible
+	- function definition/ by recursion not obviously mimicking induction, clearly terminating	-> ???, Fixpoints if possible, otherwise Equation guided by default termination metric
+	- function definition/ by arbitrary recursion																								-> induction with Equations-generated induction principles using termination metrics, ???
+2. simplification by smt vs. interactive approach in Coq																			-> better automation in custom tactics, Sniper, ???
+3. LH ? combinator vs. tactics in Coq
+	- arguments to ? in LH don't specify to what they are applied																-> smart custom tactics that infer the lacking info, good heuristics guided by conventions in LH, adding lemmas to be automatically used, backtracking
+ 	- LH specifies argument values for lemmas, Coq typically doesn't														-> allow tactics to take binder specifying values if needed, omit if can be inferred correctly
+ 	- LH simplifies proof state after each step																									-> need to simplify (and unify terms in assumptions???), betweeen proof steps
+4. arguments to ? in LH are applied smartly accross assumptions and hypothesis								-> ???
+ 	
+ 	
+ 	
