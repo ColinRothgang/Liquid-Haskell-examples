@@ -1,0 +1,5 @@
+-R . ZFC
+-arg -w -arg -deprecated-hint-without-locality
+
+InductNatExample.v
+LHCoqTactics.v
