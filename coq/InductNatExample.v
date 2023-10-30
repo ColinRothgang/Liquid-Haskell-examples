@@ -347,17 +347,61 @@ Proof.
   - smt_app_ih IHm. 
 Qed.
 
+Theorem geq_ge_eq (m:N) (n:N): geqN m n <-> (geN m n \/ eqN m n).
+Proof.
+  generalize dependent n. generalize dependent m.
+  induction m; induction n; try first [smt_trivial | destruct m'; smt_trivial].
+  (* smt_app_ih IHm *)
+Qed.
+
+Theorem geq_not_le (m:N) (n:N): geqN m n <-> not (leN m n).
+Proof.
+  generalize dependent n. generalize dependent m.
+  induction m; induction n; try first [smt_trivial | destruct m'; smt_trivial].
+  (* smt_app_ih IHm *)
+Qed.
+
+Theorem ge_eq_le_exhausitve (m:N) (n:N): geN m n \/ eqN m n \/ leN m n.
+Proof.
+  generalize dependent n. generalize dependent m.
+  induction m; induction n; try first [smt_trivial | destruct m'; smt_trivial].
+  (* smt_app_ih IHm *)
+Qed.
+
 (** This theorem cannot be translated so easily *)
 Theorem mult_zero (m:N) (n:N): (m <> Z /\ n <> Z) -> geqN (mult m n) n.
 Proof.
   induction m as [|m IHm].
   - smt_trivial.
-  - intros [H' H]. smt_app_with2 mult_suc_l m n.
-    smt_app_with2 add_comm n (mult m n).
-    smt_app_with ge_zero n.
-    smt_app_with2 add_mono_l (mult m n) n.
-    smt_app_with2 ge_geq (add (mult m n) n) n.
+  - intros [H H'].
+    (* Can replace the following 3 lines by just smt_app_with2 add_comm n (mult m n). *)
+    assert (E: mult (Suc m) n = add (mult m n) n).
+    { smt_app_with2 add_comm n (mult m n). }
+    smt_app E.
+    (* smt_app_with ge_zero n. *)
+    smt_app add_mono_l.
+    (* smt_app_with2 add_mono_l (mult m n) n.
+    smt_app_with2 ge_geq (add (mult m n) n) n.*)
 Qed.
+
+(* The below obvious translation isn't accepted by Coq, which demands a proof of Suc m >= Suc n, but there is only a proof of m >= n *)
+Fixpoint subt (m:N) (n: {v:N | geqN m v}) :=
+  match m with
+  | Z => match n with
+         | exist Z q => Z
+         | (exist (Suc n) p) => Z
+         end
+  | (Suc m') =>  match n with
+                | exist Z q => Suc m'
+                | (exist (Suc n') p) =>
+                    subt m' (exist n' p)
+                end
+  end.
+  
+  
+             
+
+
 
 
 

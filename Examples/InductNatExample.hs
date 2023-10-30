@@ -304,7 +304,7 @@ geq_ge_eq (Suc m) Z = trivial
 geq_ge_eq Z (Suc n) = trivial
 geq_ge_eq (Suc m) (Suc n) = geq_ge_eq m n
 
-{-@ geq_not_le:: n : N -> m: N -> {geqN m n <=> not (leN m n)} @-}
+{-@ geq_not_le:: m : N -> n: N -> {geqN m n <=> not (leN m n)} @-}
 geq_not_le:: N -> N -> Proof
 geq_not_le Z Z = trivial
 geq_not_le (Suc m) Z = trivial

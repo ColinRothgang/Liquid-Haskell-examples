@@ -62,7 +62,7 @@ From Sniper Require Import Sniper.
 Ltac injectivity_in H := injection H; clear H; intros H.
   
 Ltac ple := simpl; first [ intuition discriminate | try congruence | simpl_loop | eauto]; try f_equal_ind.
-Local Ltac split_ple := ple; split; ple.
+Local Ltac split_ple := ple; first [split; split_ple | ple]. (* ple; tryif split then split; split_ple else idtac.*)
 Local Ltac intros_ple :=
   let H' := fresh "H" in
   split_ple; intros H'; try injectivity_in H'; simpl in H'.
@@ -70,7 +70,7 @@ Local Ltac intros_ple :=
 Ltac smt_trivial := simpl; first [ assumption | intuition discriminate | easy ].
 
 Tactic Notation "smt_ple_tac" tactic(tac) :=
-  first [ tac | ple; tac | split_ple; tac].
+  first [ tac | ple; tac | split_ple; tac | intros_ple; tac].
 Local Ltac smt_ap th := smt_ple_tac apply th.
 Local Ltac smt_ap_with th arg := smt_ple_tac apply th with arg.
 Local Ltac smt_ap_with2 th arg arg2 := smt_ple_tac apply th with arg arg2.
@@ -87,7 +87,7 @@ Local Ltac smt_rwr_with2 th arg arg2 := smt_ple_tac rewrite <- th with arg arg2.
 Local Ltac smt_rwr_with3 th arg arg2 arg3 := smt_ple_tac rewrite <- th with arg arg2 arg3.
 
 Tactic Notation "smt_use_rw_rwr_ap" tactic(appl_tac) tactic(rw_tac) tactic(rwr_tac) :=
-  if_not_done (first [progress rw_tac | progress rwr_tac | appl_tac]).
+  first [progress rw_tac | progress rwr_tac | appl_tac].
 
 Ltac smt_use th := smt_use_rw_rwr_ap (smt_ap th) (smt_rw th) (smt_rwr th).
 Ltac smt_use_with th arg := smt_use_rw_rwr_ap (smt_ap_with th arg) (smt_rw_with th arg) (smt_rwr_with th arg).
@@ -109,15 +109,17 @@ Tactic Notation "smt_app_with3" constr(th) constr(arg) constr(arg2) constr(arg3)
 
 (** For some reason the below tactic doesn't actually work,
    instead producing "variable m unbound" errors when used *)
-(*Tactic Notation "induction_on2" constr(m) constr(n) :=
+(* Tactic Notation "induction_on2" constr(m) constr(n) :=
   generalize dependent n; generalize dependent m;
-  induction m; induction n; try first [smt_trivial | destruct m'; smt_trivial].*)
+  induction m; induction n; try first [smt_trivial | destruct m; smt_trivial].*)
 
 (* Ltac induction_on2 m n := generalize dependent n; generalize dependent m; induction m; induction n; try smt_trivial.*)
 
+Ltac repeat_until_done tac :=
+  tryif tac; tac then tac; repeat_until_done tac else tac.
 
 Ltac smt_app_ih IH :=
-  if_not_done (first [split_ple | ple]; tryif intros_ple then smt_app_ih IH else smt_app IH).
+  if_not_done (split_ple; first [smt_app IH; smt_app_ih IH | intros_ple; smt_app_ih IH]).
   (** split_ple; match goal with
   | [ |- _ = _ -> _] =>
       let H' := fresh "H" in
