@@ -297,12 +297,12 @@ ge_suc_l Z Z = trivial
 ge_suc_l Z (Suc n) = trivial
 
 -- | geqN = geN union eqN
-{-@ geq_ge_eqN:: m: N -> n: N -> { geqN m n <=> geN m n || eqN m n} @-}
-geq_ge_eqN:: N -> N -> Proof
-geq_ge_eqN Z Z = trivial
-geq_ge_eqN (Suc m) Z = trivial
-geq_ge_eqN Z (Suc n) = trivial
-geq_ge_eqN (Suc m) (Suc n) = geq_ge_eqN m n
+{-@ geq_ge_eq:: m: N -> n: N -> { geqN m n <=> geN m n || eqN m n} @-}
+geq_ge_eq:: N -> N -> Proof
+geq_ge_eq Z Z = trivial
+geq_ge_eq (Suc m) Z = trivial
+geq_ge_eq Z (Suc n) = trivial
+geq_ge_eq (Suc m) (Suc n) = geq_ge_eq m n
 
 {-@ geq_not_le:: n : N -> m: N -> {geqN m n <=> not (leN m n)} @-}
 geq_not_le:: N -> N -> Proof
@@ -356,19 +356,19 @@ geq_suc Z = trivial
 geq_suc (Suc n) = geq_suc n
 
 -- | subtraction yields a smaller number
-{-@ subt_leqN :: m: N -> {n: N | geqN m n} -> {geqN m (subt m n)} @-}
-subt_leqN Z Z = trivial
-subt_leqN (Suc m) Z = geq_refl m
-subt_leqN (Suc m) (Suc n)   = subt_leqN m n                     -- m >= m - n
+{-@ subt_leq :: m: N -> {n: N | geqN m n} -> {geqN m (subt m n)} @-}
+subt_leq Z Z = trivial
+subt_leq (Suc m) Z = geq_refl m
+subt_leq (Suc m) (Suc n)   = subt_leq m n                     -- m >= m - n
                             ? geq_suc m                        -- Suc m >= m
                             ? geq_trans (Suc m) m (subt m n)   -- Suc m >= m - n
 
 
-{-@ subt_leN :: m: N -> {n: N | geqN m n} -> {n != Z => geN m (subt m n)} @-}
-subt_leN Z Z = trivial
-subt_leN (Suc m) Z = geq_refl m
-subt_leN (Suc m) (Suc n)    = ((Suc m) `subt` (Suc n) === m `subt` n *** QED)
-                            ? subt_leqN m n                      -- m >= m - n
+{-@ subt_le :: m: N -> {n: N | geqN m n} -> {n != Z => geN m (subt m n)} @-}
+subt_le Z Z = trivial
+subt_le (Suc m) Z = geq_refl m
+subt_le (Suc m) (Suc n)    = ((Suc m) `subt` (Suc n) === m `subt` n *** QED)
+                            ? subt_leq m n                      -- m >= m - n
                             ? geq_ge_suc m (m `subt` n)           -- m >= (m - n) => S m > m - n 
                             ? eq_equal (m `subt` n) ((Suc m) `subt` (Suc n))
                             ? ge_eq_trans (Suc m) (m `subt` n) ((Suc m) `subt` (Suc n))
@@ -422,7 +422,7 @@ subt_mod m n
             | m `geN` n = trivial
             | m `eqN` n = subt_self m n
             | m `leN` n = le_geq m n
-            | otherwise = geq_ge_eqN m n
+            | otherwise = geq_ge_eq m n
 
 
 {-@ modN_post :: m:N -> {n:N | n != Z} -> {leN (modN m n) n} @-}
@@ -440,7 +440,7 @@ one_mod n
             | one `geN` n = ge_anti_comm one n
             | one `eqN` n = ge_irreflexive one n
             | one `leN` n = trivial
-            | otherwise = geq_ge_eqN one n
+            | otherwise = geq_ge_eq one n
 
 {-@ m_le_n_mod_suc :: m: N -> {n:N | n != Z} -> {geN n (Suc m) => modN (Suc m) n == Suc m} @-}
 m_le_n_mod_suc :: N -> N -> Proof
@@ -533,7 +533,7 @@ divN_subt m n
             | m `geN` n && m `geqN` n = trivial
             | m `eqN` n = subt_self m n
             | m `leN` n = le_geq m n
-            | otherwise = geq_ge_eqN m n
+            | otherwise = geq_ge_eq m n
 
 {-@ divN_zero :: m: N -> {n: N | n != Z && leN m n} -> {divN m n == Z} @-}
 divN_zero :: N -> N -> Proof
@@ -699,9 +699,9 @@ divides_self n = divides_def n n ? ((n `modN` n) ? geq_refl n  ? subt_mod n n  =
 divides_zero :: N -> Proof
 divides_zero n = (Z `modN` n     === Z   *** QED) ? divides_def n Z
 
-{-@ divides_eqN :: {m:N | m != Z} -> {n:N | eqN m n} -> {divides m n} @-}
-divides_eqN :: N -> N -> Proof
-divides_eqN m n = eq_equal m n ? divides_self m
+{-@ divides_eq :: {m:N | m != Z} -> {n:N | eqN m n} -> {divides m n} @-}
+divides_eq :: N -> N -> Proof
+divides_eq m n = eq_equal m n ? divides_self m
 
 {-@ divides_mod_eqs :: m:N -> {n:N | n != Z} -> {o: N | o != Z && mult (divN n o) o == n && mult (divN (modN m n) o) o == (modN m n)} -> {mult (add (mult (divN m n) (divN n o)) (divN (modN m n) o)) o == m} @-}
 divides_mod_eqs :: N -> N -> N -> Proof
@@ -825,6 +825,6 @@ gcd_post_1 Z n = (n === gcdN Z n *** QED) ? divides_zero n ? divides_self n
 gcd_post_1 m n 
             | gcdN m n == Z = trivial
             | m `geN` n = termination_cases_lemma m n ? gcd_post_1 (m `modN` n) n ? gcd_post_1_lemma m n
-            | m `eqN` n = divides_eqN m n
+            | m `eqN` n = divides_eq m n
             | m `leN` n = termination_cases_lemma n m ? gcd_post_1 m (n `modN` m) ? gcd_symm m n ? gcd_post_1_lemma n m
             | otherwise = ge_eq_le_exhaustive m n
