@@ -5,6 +5,8 @@ Big and hard problems:
 	- easy recursive functions 																																	-> inductive functions ("Fixpoints")
 	- complicated recursive functions 																													-> Equations
 	- function definition/proofs by recursion and matching on inductive constructors						-> inductive proofs, much simpler and preferable to Equations whenever possible
+	- induction on several variables																														-> generalize dependents, followed by inductions, destructs in cases where needed, 
+																																																 smt_app_ih tactic to move (and simplify) antecedents to assumptions before applying IH of (first) induction 
 	- function definition/ by recursion not obviously mimicking induction, clearly terminating	-> ???, Fixpoints if possible, otherwise Equation guided by default termination metric
 	- function definition/ by arbitrary recursion																								-> induction with Equations-generated induction principles using termination metrics, ???
 2. simplification by smt vs. interactive approach in Coq																			-> better automation in custom tactics, Sniper, ???
@@ -12,7 +14,10 @@ Big and hard problems:
 	- arguments to ? in LH don't specify to what they are applied																-> smart custom tactics that infer the lacking info, good heuristics guided by conventions in LH, adding lemmas to be automatically used, backtracking
  	- LH specifies argument values for lemmas, Coq typically doesn't														-> allow tactics to take binder specifying values if needed, omit if can be inferred correctly
  	- LH simplifies proof state after each step																									-> need to simplify (and unify terms in assumptions???), betweeen proof steps
+ 	- adding superfluous hints is fine in LH, but adding extra steps in Coq isn't								-> doesn't seem possible to define if_not_done tactic in Coq, so need to somehow eliminate extra steps in Coq during translation
 4. arguments to ? in LH are applied smartly accross assumptions and hypothesis								-> ???
  	
  	
- 	
+ Minor points:
+- We should translate = on Booleans to <-> in Coq
+- Rewriting via <-> (rather than =) requires setoid_rewrite

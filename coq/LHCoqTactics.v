@@ -51,13 +51,13 @@ Ltac simpl_loop :=
     | intros; exfalso
     | split].
 
-(*Require Import SMTCoq.SMTCoq.
+Require Import SMTCoq.SMTCoq.
 Require Import Bool.
 
 Require Import ZArith.
 
 Import BVList.BITVECTOR_LIST.
-From Sniper Require Import Sniper. *)
+From Sniper Require Import Sniper. 
 
 Ltac injectivity_in H := injection H; clear H; intros H.
   
@@ -109,14 +109,15 @@ Tactic Notation "smt_app_with3" constr(th) constr(arg) constr(arg2) constr(arg3)
 
 (** For some reason the below tactic doesn't actually work,
    instead producing "variable m unbound" errors when used *)
-Tactic Notation "induction_on2" constr(m) constr(n) :=
+(*Tactic Notation "induction_on2" constr(m) constr(n) :=
   generalize dependent n; generalize dependent m;
-  induction m; induction n; try smt_trivial.
+  induction m; induction n; try first [smt_trivial | destruct m'; smt_trivial].*)
 
+(* Ltac induction_on2 m n := generalize dependent n; generalize dependent m; induction m; induction n; try smt_trivial.*)
 
 
 Ltac smt_app_ih IH :=
-  if_not_done (tryif intros_ple then smt_app_ih IH else smt_app IH).
+  if_not_done (first [split_ple | ple]; tryif intros_ple then smt_app_ih IH else smt_app IH).
   (** split_ple; match goal with
   | [ |- _ = _ -> _] =>
       let H' := fresh "H" in
@@ -127,4 +128,4 @@ Ltac smt_app_ih IH :=
   | [ |- _ ] => smt_app IH
   end.*)
 
-Ltac smt_done := try ple; try smt_trivial. (*try snipe*)
+Ltac smt_done := if_not_done (try ple); if_not_done (try smt_trivial); if_not_done (try snipe).

@@ -1,6 +1,15 @@
 Load LHCoqTactics.
+Require Init.Peano.
+Require Arith.PeanoNat.
+Require Classes.RelationClasses.
 
 Inductive N:Set := Z : N | Suc: N -> N.
+
+Fixpoint toInt (n:N) :=
+  match n with
+  | Z => 0
+  | Suc n => S (toInt n)
+  end.
 
 Fixpoint add m n :=
   match m with 
@@ -142,12 +151,13 @@ Proof.
     smt_app_with2 mult_suc_r m n.
 Qed.
 
+(** Here we encounter the issue that the Coq tactics solve the goal earlier than expected *)
 Theorem mult_assoc (m:N) (n:N) (o:N): mult (mult m n) o = mult m (mult n o).
 Proof.
   induction m as [|m IHm].
   - smt_trivial.
   - smt_app_with3 add_dist_rmult n (mult m n) o. 
-    smt_app IHm.
+    (* smt_app IHm.*)
 Qed.
 
 Fixpoint eqN m n :=
@@ -157,23 +167,74 @@ Fixpoint eqN m n :=
   | _ => False
 end.
 
+(* Since LH is much better at inferring postconditions automagically we don't annotate them
+(in this case by adding return {p:Prop | p <-> (toInt m >= toInt n)} in the match)
+but instead proof them as a seperate theorem *)
 Fixpoint geqN m n :=
   match (m, n) with
-  | (_, Z) => True
+  | (Z, Z) => True
+  | (Suc m, Z) => True
   | (Z, Suc n) => False
   | (Suc m, Suc n) => geqN m n
-end.
+  end.
+
+(** Theorem stating postcondition automagically proven by LH.
+Proof is default proof for any such property
+See comment for Theorem eq_equal for explanation why this the the default shape of simple proofs by induction on two variables.
+ *)
+Theorem geqN_def (m:N) (n:N): geqN m n <-> (toInt m >= toInt n).
+Proof.
+  generalize dependent n. generalize dependent m.
+  induction m; induction n; try first [smt_trivial | destruct m'; smt_trivial].
+  smt_app_ih IHm.
+Qed.
+
+Definition leqN m n := geqN n m.
 
 Fixpoint geN m n :=
   match (m, n) with
   | (Z, _) => False
   | (Suc _, Z) => True
   | (Suc m, Suc n) => geN m n
-end.
+  end.
 
+(** Default proof again *)
+Theorem geN_def (m:N) (n: N): geN m n <-> (toInt m > toInt n).
+Proof.
+  generalize dependent n; generalize dependent m;
+  induction m; induction n; try first [smt_trivial | destruct m'; smt_trivial].
+  smt_app_ih IHm.
+Qed.
+
+Definition leN m n := geN n m.
+
+Theorem ge_measure (m:N) (n:N): geN m n <-> (toInt m > toInt n).
+Proof.
+  generalize dependent n. generalize dependent m.
+  induction m as [|m IHm]; induction n as [|n IHn];  try first [smt_trivial | destruct m'; smt_trivial].
+  smt_app_ih IHm.
+Qed.
+
+(* Here we have to explicitely destruct m in the case m:= Suc m', n:= Z for smt_trivial to succeed.
+ Still the "default proof" works here. *)
+Theorem ge_geq_suc (m:N) (n:N): geN m n <-> geqN m (Suc n).
+Proof.
+  generalize dependent n. generalize dependent m.
+  induction m as [|m' IHm]; induction n as [|n' IHn].
+  - smt_trivial.
+  - smt_trivial.
+  - destruct m'; smt_trivial.
+  - smt_app_ih IHm.
+Qed.
+
+Theorem ge_zero (n:N): (geqN n Z /\ n <> Z) -> geN n Z.
+Proof.
+  induction n as [|n IHn];  try smt_trivial.
+  (*smt_app_ih IHn.*)
+Qed.
 
 (** Two issues are demonstrated in the subsequent lemma:
-In the first inductive case (base case) we need to destruct n, for the proof to succeed
+In the first inductive case (base case) we need to explicitely destruct n, for the proof to succeed
 In the second case, the (necessary) simplification following first tactic already
 solves the proof goal, so the second argument must *not* be translated from LH to Coq
 *)
@@ -219,11 +280,79 @@ Proof.
   - smt_app eq_equal. smt_app eq_equal.
 Qed.  
 
-Theorem mult_zero (m:N) (n:N): m <> Z /\ n <> Z -> geqN (mult m n) n.
+Theorem eq_geq (m:N) (n:N): eqN m n -> geqN m n.
+Proof.
+  generalize dependent n. generalize dependent m.
+  induction m as [|m IHm]; induction n as [|n IHn]; try first [smt_trivial | destruct m'; smt_trivial].
+  (* smt_app_ih IHm. *)
+Qed.
+
+Theorem geq_refl (n:N): geqN n n.
+Proof.
+  induction n as [|n IHn].
+  - smt_trivial.
+  - smt_app_ih IHn.
+Qed.
+
+Theorem geq_trans (m:N) (n:N) (o:N): (geqN m n /\ geqN n o) -> geqN n o.
+  generalize dependent o. generalize dependent n. generalize dependent m.
+  induction m; induction n; induction o; first [ smt_trivial | destruct m'; smt_trivial | destruct m'; destruct n'; smt_trivial].
+  (* smt_app_ih IHm *)
+Qed.
+
+Theorem le_geq (m:N) (n:N): geqN m n <-> not (leN m n).
+Proof.
+  generalize dependent n. generalize dependent m.
+  induction m; induction n; try first [ smt_trivial | destruct m'; smt_trivial].
+Qed. 
+
+Theorem ge_geq (m:N) (n:N): geN m n -> geqN m n.
+Proof.
+  generalize dependent n. generalize dependent m.
+  induction m; induction n; try first [ smt_trivial | destruct m'; smt_trivial].
+Qed.
+
+Theorem ge_anti_comm (m:N) (n:N): geN m n -> not (geN n m).
+Proof.
+  generalize dependent n. generalize dependent m.
+  induction m; induction n; try first [ smt_trivial | destruct m'; smt_trivial].
+  (* smt_app_ih IHm. *)
+Qed.
+
+Theorem ge_irreflexive (m:N) (n:N): geN m n -> not (eqN m n).
+Proof.
+  generalize dependent n. generalize dependent m.
+  induction m; induction n; try first [ smt_trivial | destruct m'; smt_trivial].
+Qed.
+
+Theorem ge_trans (m:N) (n:N) (o:N): geN m n /\ geN n o -> geN m o.
+Proof.
+  generalize dependent o. generalize dependent n. generalize dependent m.
+  induction m; induction n; induction o; try first [ smt_trivial | destruct m'; smt_trivial | destruct m'; destruct n'; smt_trivial].
+  (* smt_app_ih IHm. *)
+Qed.
+
+Theorem ge_eq_trans (m:N) (n:N) (o:N): geN m n /\ eqN n o -> geN m o.
+Proof.
+  generalize dependent o. generalize dependent n. generalize dependent m.
+  induction m; induction n; induction o; try first [ smt_trivial | destruct m'; smt_trivial | destruct m'; destruct n'; smt_trivial].
+  (* smt_app_ih IHm. *)
+Qed.
+
+Theorem geq_suc_l (m:N) (n: {v:N | geqN m v}): geqN (Suc m) (proj1_sig n).
+Proof.
+  destruct n as [n H].
+  generalize dependent n. generalize dependent m.
+  induction m; induction n; try first [smt_trivial | destruct m'; smt_trivial].
+  - smt_app_ih IHm. 
+Qed.
+
+(** This theorem cannot be translated so easily *)
+Theorem mult_zero (m:N) (n:N): (m <> Z /\ n <> Z) -> geqN (mult m n) n.
 Proof.
   induction m as [|m IHm].
   - smt_trivial.
-  - smt_app_with2 mult_suc_l m n.
+  - intros [H' H]. smt_app_with2 mult_suc_l m n.
     smt_app_with2 add_comm n (mult m n).
     smt_app_with ge_zero n.
     smt_app_with2 add_mono_l (mult m n) n.
