@@ -16,9 +16,9 @@ Big and hard problems:
  	- LH simplifies proof state after each step																									-> need to simplify (and unify terms in assumptions???), betweeen proof steps
  	- adding superfluous hints is fine in LH, but adding extra steps in Coq isn't								-> doesn't seem possible to define if_not_done tactic in Coq, so need to somehow eliminate extra steps in Coq during translation
 4. arguments to ? in LH are applied smartly accross assumptions and hypothesis								-> ???
-5. Refinement types in function arguments in functio ndefinitions can be inferred only by LH	-> No obvious solution, within a function definitions we cannot apply the usual tactics (including snipe) to prove constraints
+5. Refinement types in function arguments in function definitions can be inferred only by LH	-> No obvious solution, within a function definitions we cannot apply the usual tactics (including snipe) to prove constraints
 																																																 It might be necessary to translate such functions differently 
-
+6. Proof irrelevance is required for working with subset types in Coq													-> This can hopefully be addressed via Coq custom tactics
  	
  Minor points:
 - We should translate = on Booleans to <-> in Coq
@@ -28,3 +28,4 @@ Big and hard problems:
 Further ideas:
 - can translate LHS ? just === RHS to replace (LHS) (RHS); T(just). in Coq where T(just):=smt_apply_withn just (where n is number of arguments the head of just is applied to) is the translation of just in Coq
 - translate (LHS  ? just === ... ? justn === RHS) ? ... to assert (eq: LHS = RHS); T(just); ...; T(justn); smt_app eq  in Coq ???
+- modify smt_apply to rewrite/apply if possible, otherwise figure out arguments of lemma and add conclusion to context, to be used later
