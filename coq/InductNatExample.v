@@ -389,10 +389,33 @@ Proof.
   simpl. intros_ple.
 Qed.
 
-(* The below translation isn't accepted by Coq, which demands a proof of Suc m' >= Suc n' to apply the lemma,
+(* This somewhat unorthodox way of defining subt lets us do reasoning inside the very definition *)
+Fixpoint subt (m:N) (n: {v:N | geqN m v}) : N.
+Proof.
+  destruct n as [n H].
+  induction n as [|n'].
+  - exact m.
+  - induction m as [|m'].
+    + simpl in H. exfalso. apply H.
+    + apply subt_def_suc_suc_lemma in H.
+      exact (subt m' (exist n' H)).
+Defined.
+
+(*
+(* The below more direct translation isn't accepted by Coq, which demands a proof of Suc m' >= Suc n' to apply the lemma,
 but there is only a proof of m >= Suc n' in the case of m = Suc m' and Coq cannot figure out that thus
 m = Suc m' *)
 Fixpoint subt (m:N) (n: {v:N | geqN m v}) :=
+  match n with
+  | exist Z q => m
+  | exist (Suc n') p =>
+      match m with
+      | Z => Z (* IMPOSSIBLE *)
+      | Suc m' => subt m' (exist n' (subt_def_suc_suc_lemma m' n' p)) (* or alternatively: subt_def_suc_suc_def m (exist n' p) *)
+      end
+  end.
+  
+(* Fails with same issue:
   match m with
   | Z => match n with
          | exist Z q => m
@@ -400,14 +423,31 @@ Fixpoint subt (m:N) (n: {v:N | geqN m v}) :=
          end
   | (Suc m') =>  match n with
                 | exist Z q => m
-                | (exist (Suc n') p) =>
+                | (exist (Suc n') p) => (*subt m' (subt_def_suc_suc_cast m' (exist n' p)) *)
                     subt m' (exist n' (subt_def_suc_suc_lemma m' n' p))
                 end
-  end.
+  end.*) *)
 
-Theorem subt_def (m:N) (n: {v: N | geq m v}): n <> Z <-> (toInt (subt m n)  < toInt m).
+Theorem subt_def (m:N) (n: {v: N | geqN m v}): (proj1_sig n <> Z) <-> (toInt (subt m n)  < toInt m).
 Proof.
-Admitted.
+  destruct n as [n H].
+  generalize dependent n. generalize dependent m.
+  induction m as [|m' IHm]; try (destruct n; smt_trivial). simpl in IHm.
+  induction n as [|n' IHn]; try smt_trivial.
+  intros H. split_ple.
+  assert (H': geqN m' n').
+  { apply subt_def_suc_suc_lemma in H. smt_app H. }
+  intros Q; clear Q.
+  assert (IH: (n' <> Z) -> toInt (subt m' (exist n' (subt_def_suc_suc_lemma m' n' H))) < toInt m').
+  - smt_app_ih IHm.
+  - destruct n' eqn:E.
+    + destruct m'; smt_trivial.
+    + assert (L: toInt (subt m' (exist (Suc n) (subt_def_suc_suc_lemma m' (Suc n) H))) < toInt m').
+      * apply IH. ple.
+      * smt_done.
+Qed.
+
+  
   
              
 
