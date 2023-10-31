@@ -7,6 +7,8 @@ Require Import Setoid.
 (** to rewrite using <-> *)
 Require Import Classes.Morphisms_Prop.
 
+Require Export Logic.ProofIrrelevanceFacts.
+Require Export Program.Subset.
 Require Export Init.Tactics.
 
 

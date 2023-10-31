@@ -401,33 +401,6 @@ Proof.
       exact (subt m' (exist n' H)).
 Defined.
 
-(*
-(* The below more direct translation isn't accepted by Coq, which demands a proof of Suc m' >= Suc n' to apply the lemma,
-but there is only a proof of m >= Suc n' in the case of m = Suc m' and Coq cannot figure out that thus
-m = Suc m' *)
-Fixpoint subt (m:N) (n: {v:N | geqN m v}) :=
-  match n with
-  | exist Z q => m
-  | exist (Suc n') p =>
-      match m with
-      | Z => Z (* IMPOSSIBLE *)
-      | Suc m' => subt m' (exist n' (subt_def_suc_suc_lemma m' n' p)) (* or alternatively: subt_def_suc_suc_def m (exist n' p) *)
-      end
-  end.
-  
-(* Fails with same issue:
-  match m with
-  | Z => match n with
-         | exist Z q => m
-         | (exist (Suc n) p) => Z
-         end
-  | (Suc m') =>  match n with
-                | exist Z q => m
-                | (exist (Suc n') p) => (*subt m' (subt_def_suc_suc_cast m' (exist n' p)) *)
-                    subt m' (exist n' (subt_def_suc_suc_lemma m' n' p))
-                end
-  end.*) *)
-
 Theorem subt_def (m:N) (n: {v: N | geqN m v}): (proj1_sig n <> Z) <-> (toInt (subt m n)  < toInt m).
 Proof.
   destruct n as [n H].
@@ -447,11 +420,14 @@ Proof.
       * smt_done.
 Qed.
 
-  
-  
-             
-
-
-
-
-
+(* The problem here is that the induction hypothesis contains a different proof of m >= n, than the one we have in the proof.
+ Using the Proof irrelevance lemma for subset types solves that issue. *)
+Theorem subt_self (m:N) (n: N) (H: eqN m n): subt m (exist n (eq_geq m n H)) = Z.
+Proof.
+  generalize dependent n. generalize dependent m.
+  induction m; induction n; try first [smt_trivial | destruct m'; smt_trivial].
+  intros_ple.
+  assert (proof_irrevelance: (exist n (subt_def_suc_suc_lemma m n (eq_geq (Suc m) (Suc n) H))) = (exist n (eq_geq m n H))).
+  { apply subset_eq_compat. reflexivity. }
+  smt_app proof_irrelevance.
+Qed.
