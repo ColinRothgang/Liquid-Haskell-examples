@@ -384,20 +384,30 @@ Proof.
     smt_app_with2 ge_geq (add (mult m n) n) n.*)
 Qed.
 
-(* The below obvious translation isn't accepted by Coq, which demands a proof of Suc m >= Suc n, but there is only a proof of m >= n *)
+Theorem subt_def_suc_suc_lemma (m': N) (n':N): geqN (Suc m') (Suc n') -> geqN m' n'.
+Proof.
+  simpl. intros_ple.
+Qed.
+
+(* The below translation isn't accepted by Coq, which demands a proof of Suc m' >= Suc n' to apply the lemma,
+but there is only a proof of m >= Suc n' in the case of m = Suc m' and Coq cannot figure out that thus
+m = Suc m' *)
 Fixpoint subt (m:N) (n: {v:N | geqN m v}) :=
   match m with
   | Z => match n with
-         | exist Z q => Z
+         | exist Z q => m
          | (exist (Suc n) p) => Z
          end
   | (Suc m') =>  match n with
-                | exist Z q => Suc m'
+                | exist Z q => m
                 | (exist (Suc n') p) =>
-                    subt m' (exist n' p)
+                    subt m' (exist n' (subt_def_suc_suc_lemma m' n' p))
                 end
   end.
-  
+
+Theorem subt_def (m:N) (n: {v: N | geq m v}): n <> Z <-> (toInt (subt m n)  < toInt m).
+Proof.
+Admitted.
   
              
 
