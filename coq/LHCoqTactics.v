@@ -140,3 +140,7 @@ Ltac smt_app_ih IH :=
   end.*)
 
 Ltac smt_done := if_not_done (try ple); if_not_done (try smt_trivial); if_not_done (try snipe).
+
+(* equality on subset types with proof irrelevance *)
+Notation "x `= y" := (@eq _ (`x) (`y)) (at level 70).
+Notation "# x" := (exist x I) (at level 60).

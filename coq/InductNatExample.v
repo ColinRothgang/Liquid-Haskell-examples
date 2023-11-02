@@ -11,37 +11,52 @@ Fixpoint toInt (n:N) :=
   | Suc n => S (toInt n)
   end.
 
-Fixpoint add m n :=
+Fixpoint add_unrefined m n :=
   match m with 
   | Z  => n 
-  | Suc m => Suc (add m n) end.
+  | Suc m => Suc (add_unrefined m n) end.
+
+Fixpoint add (m: {v:N | True}) (n: {n:N | True}) : {v:N | v = add_unrefined (` m) (` n)}.
+Proof.
+  destruct m as [mv mp]. destruct n as [nv np].
+  exact (exist (add_unrefined mv nv) eq_refl).
+(* In case we want to make this less opaque, we might define it inductively by:
+   induction mv as [|m' IHm].
+  - exact (exist nv eq_refl).
+  - destruct IHm as [IHres IHp].
+    exact (exist (Suc IHres) (eq_ind_r (fun IHres0 : N => Suc IHres0 = add_unrefined (Suc m') nv) eq_refl IHp)).*)
+Defined.
 
 (** Section Addition definition lemmas: *)
-Theorem add_zero_l (n: N): add Z n = n.
+Theorem add_zero_l (n: {v:N | True}): add (#Z) n `= n.
 Proof.
+  destruct n as [n H].
   induction n.
   - smt_trivial.
   - smt_trivial.
 Qed.
 
-Theorem add_suc_l (m:N) (n: N): Suc (add m n) = add (Suc m) n.
-Proof. 
+Theorem add_suc_l (m: {v:N | True}) (n: {v:N | True}): Suc (` (add m n)) = ` (add (#(Suc (`m))) n).
+Proof.
+  destruct m as [m mp]. destruct n as [n np]. 
   induction n.
   - smt_trivial.
   - smt_trivial.
 Qed.
 
 (** Addition with right zero *)
-Theorem add_zero_r (n: N): add n Z = n.
+Theorem add_zero_r (n: {v:N| True}): add n (# Z) `= n.
 Proof.
+  destruct n as [n np].
   induction n.
   - smt_trivial.
   - smt_app IHn.
 Qed.
 
 (** Addition with right sucessor *)
-Theorem add_suc_r (m: N) (n: N): Suc (add m n) = add m (Suc n).
+Theorem add_suc_r (m: {v:N | True}) (n: {v:N | True}): Suc (` (add m n)) = ` (add m (# (Suc (` n)))).
 Proof.
+  destruct m as [m mp]. destruct n as [n np].
   induction m as [|m IHm].
   - smt_trivial.
   - smt_app IHm.
