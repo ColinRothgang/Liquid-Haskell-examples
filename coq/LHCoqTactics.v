@@ -70,7 +70,7 @@ From Sniper Require Import Sniper.
 
 Ltac injectivity_in H := injection H; clear H; intros H.
   
-Ltac ple := simpl; first [ intuition discriminate | try congruence | simpl_loop | eauto]; try f_equal_ind.
+Ltac ple := simpl; first [ intuition discriminate | try congruence | simpl_loop (*| eauto*) ]; try f_equal_ind.
 Local Ltac split_ple := ple; first [split; split_ple | ple]. (* ple; tryif split then split; split_ple else idtac.*)
 Local Ltac intros_ple :=
   let H' := fresh "H" in

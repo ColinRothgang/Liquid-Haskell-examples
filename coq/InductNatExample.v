@@ -446,9 +446,18 @@ Proof.
   - smt_app_with add_zero_r n'.
     assert (H: eqN (add n' Z) (add n' Z)).
     { simpl. clear IHn. induction n' as [|n'' IHn'']; smt_trivial. }
-    assert (proof_irrevelance: (exist (add n' Z) (subt_def_suc_suc_lemma (add n' Z) (add n' Z) (add_subt_wff_lemma Z (Suc (add n' Z))))) = (exist (add n' Z) (eq_geq (add n' Z) (add n' Z) H)) ).
-    { apply subset_eq_compat. reflexivity. }
-    (* Doesn't work yet 
+    replace (exist (add n' Z) (subt_def_suc_suc_lemma (add n' Z) (add n' Z) (add_subt_wff_lemma Z (Suc (add n' Z))))) with (exist (add n' Z) (eq_geq (add n' Z) (add n' Z) H)); [| smt_app subset_eq_compat].
+    smt_app subt_self.
+  - ple.
+    (* Now we cannot replace m' + (Suc n') with (Suc m') + n' (to apply IHn), as then the subset proof for n' no longer applies *)
+    (* replace (exist n' (subt_def_suc_suc_lemma (add m' (Suc n')) n' (add_subt_wff_lemma (Suc m') (Suc n'))))
+      with  (exist n' (subt_def_suc_suc_lemma (add (Suc m') n') n' (add_subt_wff_lemma (Suc m') (Suc n')))); [| apply subset_eq_compat].
+    replace (add m' (Suc n')) with (add (Suc m') n'); [| rewrite <- add_suc_r; rewrite add_suc_l; reflexivity ].*)
+    assert (K: geqN (add m' (Suc n')) n').
+    { exact ((subt_def_suc_suc_lemma (add m' (Suc n')) n' (add_subt_wff_lemma (Suc m') (Suc n')))). }
+    replace (exist n' (subt_def_suc_suc_lemma (add m' (Suc n')) n' (add_subt_wff_lemma (Suc m') (Suc n')))) with (exist n' K); [|apply subset_eq_compat; reflexivity].
+    (* We are stuck here again, unfortunately:
+    rewrite <- add_suc_r. rewrite add_suc_l.
     rewrite proof_irrelevance. smt_app subt_self.
 Qed. *)
 Admitted.
