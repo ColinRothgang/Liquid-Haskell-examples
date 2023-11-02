@@ -11,6 +11,13 @@ Require Export Logic.ProofIrrelevanceFacts.
 Require Export Program.Subset.
 Require Export Init.Tactics.
 
+Require Import Arith.
+Require Import Program.
+Require Import omega.OmegaLemmas.
+From Equations Require Import Equations.
+
+Require Import Lia.
+
 
 (** The first two tactics are taken from https://gitlab.mpi-sws.org/iris/stdpp/-/blob/df33944852793fd7a93368b6b0251e9f29a3c4dd/stdpp/tactics.v#L45-78 (they are BSD licensed).*)
 
@@ -72,7 +79,7 @@ Local Ltac intros_ple :=
 Ltac smt_trivial := simpl; first [ assumption | intuition discriminate | easy ].
 
 Tactic Notation "smt_ple_tac" tactic(tac) :=
-  first [ tac | ple; tac | split_ple; tac | intros_ple; tac].
+  first [ tac | ple; tac | split_ple; tac (* | intros_ple; tac*) ].
 Local Ltac smt_ap th := smt_ple_tac apply th.
 Local Ltac smt_ap_with th arg := smt_ple_tac apply th with arg.
 Local Ltac smt_ap_with2 th arg arg2 := smt_ple_tac apply th with arg arg2.

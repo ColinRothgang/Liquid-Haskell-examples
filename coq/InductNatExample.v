@@ -254,7 +254,7 @@ Proof.
   For reasons I don't understand, the below tactic doesn't succeed (using apply with directly gives error:
   not the right number of missing arguments (expected 0),
   so it looks as though apply doesn't accept argument for the theorem that does take arguments):
-  smt_app_with2 add_mono_r (m:=n) (n:=m).*)
+  smt_app_with2 add_mono_r n m.*)
 Qed.
 
 (** The following theorem is rather hard to translate:
@@ -431,3 +431,24 @@ Proof.
   { apply subset_eq_compat. reflexivity. }
   smt_app proof_irrelevance.
 Qed.
+
+Theorem add_subt_wff_lemma (m:N) (n:N): geqN (add m n) n.
+Proof.
+  smt_app add_mono_l.
+Qed.
+
+(* Here we actually have to infer a witness for add m n >= n to even state the theorem *)
+Theorem add_subt (m:N) (n:N): subt (add m n) (exist n (add_subt_wff_lemma m n)) = m.
+Proof.
+  generalize dependent m. generalize dependent n.
+  induction n as [|n' IHn]; induction m as [|m' IHm]; try smt_trivial.
+  - smt_app_with add_zero_r m'.
+  - smt_app_with add_zero_r n'.
+    assert (H: eqN (add n' Z) (add n' Z)).
+    { simpl. clear IHn. induction n' as [|n'' IHn'']; smt_trivial. }
+    assert (proof_irrevelance: (exist (add n' Z) (subt_def_suc_suc_lemma (add n' Z) (add n' Z) (add_subt_wff_lemma Z (Suc (add n' Z))))) = (exist (add n' Z) (eq_geq (add n' Z) (add n' Z) H)) ).
+    { apply subset_eq_compat. reflexivity. }
+    (* Doesn't work yet 
+    rewrite proof_irrelevance. smt_app subt_self.
+Qed. *)
+Admitted.
