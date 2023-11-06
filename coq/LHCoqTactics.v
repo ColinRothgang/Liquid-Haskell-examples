@@ -18,6 +18,10 @@ From Equations Require Import Equations.
 
 Require Import Lia.
 
+Require Init.Peano.
+Require Arith.PeanoNat.
+Require Classes.RelationClasses.
+
 
 (** The first two tactics are taken from https://gitlab.mpi-sws.org/iris/stdpp/-/blob/df33944852793fd7a93368b6b0251e9f29a3c4dd/stdpp/tactics.v#L45-78 (they are BSD licensed).*)
 

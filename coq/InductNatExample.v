@@ -1,7 +1,4 @@
 Load LHCoqTactics.
-Require Init.Peano.
-Require Arith.PeanoNat.
-Require Classes.RelationClasses.
 
 Inductive N:Set := Z : N | Suc: N -> N.
 Notation "@ x" := (inject_into_trivial_subset_type N x) (at level 60).

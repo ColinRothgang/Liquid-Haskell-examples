@@ -11,11 +11,16 @@ ghc-options: -fplugin=LiquidHaskell -fplugin-opt=LiquidHaskell:--counter-example
 
 dependencies:
   - liquidhaskell
+  - liquidhaskell-boot
   - liquid-prelude
   - liquid-vector
   - base
   - containers
   - vector
+  - liquid-fixpoint
+  - mtl
+  - ghc
+  - ghc-paths
 
 library:
   source-dirs:
