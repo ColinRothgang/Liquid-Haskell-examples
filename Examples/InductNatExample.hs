@@ -1,16 +1,21 @@
 {-# OPTIONS_GHC -fplugin=LiquidHaskell #-}
 {-@ LIQUID "--ple" @-}
 {-@ LIQUID "--reflection" @-}
+
 -- {-@ LIQUID "--diff" @-}
 -- {-# LANGUAGE GADTs #-}
 
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE PackageImports #-}
 module InductNatExample where
 
+{-@ embed GHC.Types.Int as int @-}
+{-@ embed GHC.Types.Bool as bool @-}
+-- importing the below should make the above embeds unnecessary but it doesn't
+-- import Prelude_LHAssumptions
+
+
 {- HLINT ignore -}
 import Language.Haskell.Liquid.ProofCombinators
-import Prelude
 
 {-@ data N [toInt] = Z | Suc N @-}
 data N = Z | Suc N deriving Eq
@@ -105,6 +110,7 @@ mult_one_r :: N -> Proof
 mult_one_r Z    = trivial
 mult_one_r (Suc n) = mult_one_r n
 
+{-
 -- | Multiplication with left one
 {-@ mult_one_l :: n: N -> {mult one n == n} @-}
 mult_one_l :: N -> Proof
@@ -829,3 +835,5 @@ gcd_post_1 m n
             | m `eqN` n = divides_eq m n
             | m `leN` n = termination_cases_lemma n m ? gcd_post_1 m (n `modN` m) ? gcd_symm m n ? gcd_post_1_lemma n m
             | otherwise = ge_eq_le_exhaustive m n
+
+-}

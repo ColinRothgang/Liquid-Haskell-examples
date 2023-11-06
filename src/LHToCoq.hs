@@ -22,13 +22,18 @@ run args = do
     (binds,specs) <- B.first (filter (not . isIgnoredBind)) <$> getBindsAndSpecs args
     let
       specMap = SLH.transSig <$> M.fromList specs
+      fileName = last $ split '/' (head args)
+      outputPath = "out/"++fileName++".v"
       lhDefs = map CLH.transBind (simplify <$> binds)
       defsAndProofs = parseDefsAndProofs $ pairLHDefsWithSigs lhDefs specMap
       translatedDefsAndProofs = map (B.bimap LH.transDef LH.transLH) defsAndProofs
       translations = map (\v -> case v of { Left x -> show x; Right x -> show x }) translatedDefsAndProofs
-      
+      output = intercalate "\n" (preamble++translations)
+     
     mapM_ putStrLn preamble
     mapM_ putStrLn translations
+    writeFile outputPath output
+    
 
 type SpecPair = (Id, LhLib.SpecType)
 

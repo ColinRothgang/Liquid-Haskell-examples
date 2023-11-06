@@ -68,19 +68,14 @@ rename name = ask <&> (fromMaybe name . M.lookup name)
 
 transLH :: Proof -> C.Proof
 transLH (Proof def@(Def name dArgs body) sig) =
-    C.Proof name (args ++ refts) (transResLHArg res) (transformTop def reftIds)
+    C.Proof name args (transResLHArg res) (transformTop def)
   where
     Signature sigArgs res = renameSigArgs dArgs sig
-    (args, refts) = B.second catMaybes . unzip $ map transLHArg sigArgs
-    (reftIds,_)   = unzip refts
+    args = map transLHArg sigArgs
 
-type CoqArg = (Id, C.Type)
-transLHArg :: LHArg -> (CoqArg, Maybe CoqArg)
-transLHArg (LHArg name ty reft) =
-  ((name, C.TExpr $ transType ty),
-    case reft of
-      LHVar "True" -> Nothing
-      _            -> Just (name ++ "_reft", C.TProp $ transProp reft))
+type CoqArg = (Id, C.Type, C.Prop)
+transLHArg :: LHArg -> CoqArg
+transLHArg (LHArg name ty reft) = (name, C.TExpr $ transType ty, transProp reft)
 
 transResLHArg :: LHArg -> C.Prop
 transResLHArg (LHArg _ _ reft) = transProp reft
@@ -97,8 +92,8 @@ transExpr (App f es) = C.App f $ map transExpr es
 transExpr (Var x)    = C.Var $ handleId x
   where
     handleId = \case
-      "True"  -> "true"
-      "False" -> "false"
+      "True"  -> "True"
+      "False" -> "False"
       other   -> other
 transExpr (Let id e1 e2) = C.Let id (transExpr e1) (transExpr e2)
 transExpr (Case e b bs) = C.Match (transExpr e) b $ map (B.bimap transPat transExpr) bs
@@ -134,8 +129,8 @@ transLHExpr e            = error "not an expression."
 transProp :: LHExpr -> C.Prop
 transProp (Brel brel e1 e2) = C.Brel (transBrel brel) (transLHExpr e1) (transLHExpr e2)
 transProp (And es) = C.And $ map transProp es
-transProp (LHApp f es) = C.proofExpr $ C.App f $ map transLHExpr es
-transProp (LHVar x)    = C.proofExpr $ C.Var x
+transProp (LHApp f es) = C.PExpr $ C.App f $ map transLHExpr es
+transProp (LHVar x)    = C.PExpr $ C.Var x
 
 data Environment =  Env
   { envName :: Id
@@ -157,11 +152,11 @@ checkInductiveCall indVars allArgs@((Var arg,pos):args) =
     _                 -> checkInductiveCall indVars args
 checkInductiveCall indVars (_:args) = checkInductiveCall indVars args
 
-transformTop :: Def -> [Id] -> [C.Tactic]
-transformTop def@(Def name args e) refts =
+transformTop :: Def -> [C.Tactic]
+transformTop def@(Def name args e) =
     case runReader (transformInductive e) env of
       Nothing        -> transBranch e
-      Just (arg, e') -> transIndDef (Def name args e') arg refts
+      Just (arg, e') -> transIndDef (Def name args e') arg
   where
     env = Env name (M.fromList $ zip args [0..]) M.empty
 
@@ -210,18 +205,18 @@ transformInductive (QMark e1 e2) = do
         return $ (\ (arg, e2') -> Just (arg, QMark e1 e2')) =<< mInd2
 transformInductive _ = return Nothing
 
-transIndDef :: Def -> Arg -> [Id] -> [C.Tactic]
-transIndDef (Def name args (Case (Var ind) _ [(_,e1), (_,e2)])) (pos, var) refts =
-    revertRefts ?: revertArgs ?: [induction [intros ?: transBranch e1, intros ?: transBranch e2]]
+transIndDef :: Def -> Arg -> [C.Tactic]
+transIndDef (Def name args (Case (Var ind) _ [(_,e1), (_,e2)])) (pos, var) =
+    revertArgs ?: [induction [intros ?: transBranch e1, intros ?: transBranch e2]]
   where
     notNullApply :: ([a] -> b) -> [a] -> Maybe b
     notNullApply f args = toMaybe (notNull args) (f args)
-    [intros, revertRefts, revertArgs] =
-        zipWith notNullApply [C.Intros, C.Revert, C.Revert] [allArgs, refts, nonIndArgs]
-    allArgs = nonIndArgs ++ refts
+    [intros, revertArgs] =
+        zipWith notNullApply [C.Intros, C.Revert, C.Revert] [allArgs, nonIndArgs]
+    allArgs = nonIndArgs
     nonIndArgs = deleteAt args pos
     induction = C.Induction (args !! pos) var name
-transIndDef def _ _ = error $ "unhandled proof case of " ++ show def
+transIndDef def _ = error $ "unhandled proof case of " ++ show def
 
 transBranch :: Expr -> [C.Tactic]
 transBranch = updateLast C.toSolve . transProof

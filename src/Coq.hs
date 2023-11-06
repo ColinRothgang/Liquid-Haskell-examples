@@ -3,16 +3,17 @@ import Util
 import Prelude
 
 
-data Proof = Proof {cpName :: Id, cpArgs :: [(Id,Type)], cpType :: Prop, cpbody :: [Tactic]}
+data Proof = Proof {cpName :: Id, cpArgs :: [(Id, Type, Prop)], cpType :: Prop, cpbody :: [Tactic]}
 instance Show Proof where
   show (Proof name args ty bod) =
     "Theorem " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ show ty ++ ".\n"
     ++ "Proof.\n"
+    ++ unwords (map (show . destructSubsetArg) args)
     ++ intercalate ". " (map show bod) ++ ".\n"
     ++ "Qed.\n"
 -- data Proof = IndProof {bod :: ProofBod  , proofIndArg :: (Id,Int)} | NIndProof {bod :: PrBod}
-showArg :: (Id,Type) -> String
-showArg (arg, t) = addParens $ arg ++ ": " ++ show t
+showArg :: (Id,Type, Prop) -> String
+showArg (arg, t, p) = addParens $ (arg ++ ": { v : " ++ show t ++ " | " ++ show p ++ " }")
 
 data Def = Def {defName :: Id, defArgs:: [Id], defBody :: Expr}
 instance Show Def where
@@ -45,7 +46,10 @@ showAppArg :: Expr -> String
 showAppArg app@(App _ (_:_)) = addParens $ show app
 showAppArg e = show e
 
-data Type = TExpr Expr | TProp Prop
+destructSubsetArg :: (Id,Type, Prop) -> Tactic
+destructSubsetArg (name, ty, refts) = Destruct (Var name) [[name, name++"p"]] []
+
+data Type = TExpr Expr | TProp Prop | RExpr Expr Prop
 instance Show Type where
   show (TExpr e) = show e
   show (TProp p) = show p
@@ -71,7 +75,7 @@ ple = "ple"
 
 apply = "smt_app"
 
-solve = "smt_solve"
+solve = apply
 
 data Tactic = Trivial
             | Ple
