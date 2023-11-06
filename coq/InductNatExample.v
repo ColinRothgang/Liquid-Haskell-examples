@@ -4,6 +4,7 @@ Require Arith.PeanoNat.
 Require Classes.RelationClasses.
 
 Inductive N:Set := Z : N | Suc: N -> N.
+Notation "@ x" := (inject_into_trivial_subset_type N x) (at level 60).
 
 Fixpoint toInt (n:N) :=
   match n with
@@ -28,7 +29,7 @@ Proof.
 Defined.
 
 (** Section Addition definition lemmas: *)
-Theorem add_zero_l (n: {v:N | True}): add (#Z) n `= n.
+Theorem add_zero_l (n: {v:N | True}): add (# Z) n `= n.
 Proof.
   destruct n as [n H].
   induction n.
@@ -63,16 +64,22 @@ Proof.
 Qed.
 
 (** Addition commutes *)
-Theorem add_comm (m:N) (n:N): add m n = add n m.
+Theorem add_comm (m:{v:N|True}) (n:{v:N|True}): add m n `= add n m.
 Proof.
+  destruct m as [m mp]. destruct n as [n np].
   induction m as [|m IHm].
   - smt_app add_zero_r.
-  - smt_app IHm. smt_app add_suc_r.
+  - unfold add. simpl. unfold add in IHm. simpl in IHm.
+    assert (add_suc_r_res: Suc (` (add (# n) (# m))) = ` (add (# n) (# (Suc (` (# m)))))).
+    { smt_app_with2 add_suc_r (# n) (# m). }
+    simpl in add_suc_r_res. rewrite <- add_suc_r_res.
+    rewrite IHm. smt_trivial.
 Qed.
 
 (* Addition  is associative *)
-Theorem add_assoc (m:N) (n:N) (o:N): add m (add n o) = add (add m n) o.
+Theorem add_assoc (m:{v:N|True}) (n:{v:N|True}) (o:{v:N|True}): add m (# (` (add n o))) `= add (# (` (add m n))) o.
 Proof.
+  destruct m as [m mp]. destruct n as [n np]. destruct o as [o op].
   induction m as [|m IHm].
   - smt_trivial.
   - smt_app IHm.
@@ -80,58 +87,80 @@ Qed.
 
 
 (** Multiplication of natural numbers *)
-Fixpoint mult m n :=
+Fixpoint mult_unrefined m n :=
   match m with
   | Z => Z
-  | Suc m => add n (mult m n)
-end.
+  | Suc m => ` (add (# n) (# (mult_unrefined m n)))
+  end.
+
+Fixpoint mult (m: {v:N | True}) (n: {v:N | True}): {v:N | v = mult_unrefined (` m) (` n) }.
+Proof.
+  destruct m as [m mp]. destruct n as [n np].
+  exact (exist (mult_unrefined m n) eq_refl).
+Defined.
 
 (** Multiplication definition lemmas: *)
-Theorem mult_zero_l (n:N): mult Z n = Z.
+Theorem mult_zero_l (n:{v:N|True}): mult (@ Z) n `= (@ Z).
 Proof.
+  destruct n as [n np].
   induction n as [|n IHn].
   - smt_trivial.
   - smt_app IHn.
 Qed.
 
-Theorem mult_suc_l (m:N) (n:N): mult (Suc m) n = add n (mult m n).
+Theorem mult_suc_l (m:{v:N|True}) (n:{v:N|True}): mult (#(Suc (` m))) n `= add n (# (` (mult m n))).
 Proof.
+  destruct m as [m mp]. destruct n as [n np].
   induction m as [|m IHm].
   - smt_trivial.
   - smt_trivial.
 Qed.
 
 (** Multiplication with right zero *)
-Theorem mult_zero_r (n:N): mult n Z = Z.
+Theorem mult_zero_r (n:{v:N|True}): mult n (@ Z) `= (@ Z).
 Proof.
+  destruct n as [n np].
   induction n as [|n IHn].
   - smt_trivial.
   - smt_app IHn.
 Qed.
 
 (** Multiplication with right sucessor *)
-Theorem mult_suc_r (n:N) (m:N): mult n (Suc m) = add n (mult n m).
+Theorem mult_suc_r (n:{v:N|True}) (m:{v:N|True}): mult n (@ (Suc (`m))) `= add n (#(` (mult n m))).
 Proof.
+  destruct m as [m mp]. destruct n as [n np].
   induction n as [|n IHn].
   - smt_trivial.
-  - smt_app IHn. 
-    
-    (** Obvious translation, nor working:
-    smt_app add_assoc.
-    smt_app add_comm. 
-    smt_app add_assoc.
-    *)
-    smt_app_with3 add_assoc (m) (n) (mult n m).
-    smt_app_with3 add_assoc n m (mult n m).
-    smt_app_with2 add_comm m n. 
+  - simpl. simpl in IHn.
+    rewrite IHn. 
+    assert (add_assoc_res_unrefined: add_unrefined m (add_unrefined n (mult_unrefined n m)) = add_unrefined (add_unrefined m n) (mult_unrefined n m)).
+    { replace (add_unrefined m (add_unrefined n (mult_unrefined n m))) with (` (add (@ m) (@ (` (add (@n) (@ (mult_unrefined n m))))))); [|reflexivity]. 
+      replace (add_unrefined (add_unrefined m n) (mult_unrefined n m)) with (` (add (@ (` (add (@m) (@n)))) (@ (mult_unrefined n m)))); [|reflexivity].
+      replace (mult_unrefined n m) with (` (mult (@ n) (@ m))); [|reflexivity].
+      apply add_assoc.
+    }
+    rewrite add_assoc_res_unrefined. 
+    assert (add_assoc_res_unrefined2: add_unrefined n (add_unrefined m (mult_unrefined n m)) = add_unrefined (add_unrefined n m) (mult_unrefined n m)).
+    { replace (add_unrefined n (add_unrefined m (mult_unrefined n m))) with (` (add (@ n) (@ (` (add (@m) (@(mult_unrefined n m))))))); [|reflexivity].
+      replace (add_unrefined (add_unrefined n m) (mult_unrefined n m)) with (` (add (@ (` (add (@n) (@m)))) (@ (mult_unrefined n m)))); [|reflexivity].
+      replace (mult_unrefined n m) with (` (mult (@ n) (@ m))); [|reflexivity].
+      apply add_assoc.
+    }
+    rewrite add_assoc_res_unrefined2.
+    assert (add_comm_res_unrefined: add_unrefined m n = add_unrefined n m).
+    { replace (add_unrefined m n) with (` (add (@m) (@n))); [|reflexivity].
+      replace (add_unrefined n m) with (` (add (@n) (@m))); [|reflexivity].
+      apply add_comm. }
+    smt_trivial.
 Qed.
 
 Definition one := Suc Z.
 Definition two := Suc one.
 
 (** Multiplication with right 1 *)
-Theorem mult_one_r (n:N): mult n one = n.
+Theorem mult_one_r (n:{v:N|True}): mult n (@one) `= n.
 Proof.
+  destruct n as [n np].
   induction n as [|n IHn].
   - smt_trivial.
   - smt_app IHn. 
