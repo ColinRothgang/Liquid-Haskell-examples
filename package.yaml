@@ -6,8 +6,13 @@ name: Liquid-Haskell-examples
 # To avoid duplicated efforts in documentation and dealing with the
 # complications of embedding Haddock markup inside cabal files, it is
 # common to point users to the README.md file.
-ghc-options: -fplugin=LiquidHaskell -fplugin-opt=LiquidHaskell:--counter-examples
+ghc-options: -fplugin-opt=LiquidHaskell:--counter-examples
 
+
+executable:
+  main: Main.hs
+  source-dirs: app
+  dependencies: Liquid-Haskell-examples
 
 dependencies:
   - liquidhaskell
@@ -25,3 +30,5 @@ dependencies:
 library:
   source-dirs:
     - Examples
+    - src
+  exposed-modules: LHToCoq

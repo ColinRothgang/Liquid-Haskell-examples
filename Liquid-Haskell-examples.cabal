@@ -10,15 +10,46 @@ build-type:     Simple
 
 library
   exposed-modules:
+      LHToCoq
+  other-modules:
       InductNatExample
       IntNatExample
-  other-modules:
+      Coq
+      CoreToLH
+      LH
+      Preamble
+      Simplify
+      SpecToLH
+      Util
       Paths_Liquid_Haskell_examples
   hs-source-dirs:
       Examples
-  ghc-options: -fplugin=LiquidHaskell -fplugin-opt=LiquidHaskell:--counter-examples
+      src
+  ghc-options: -fplugin-opt=LiquidHaskell:--counter-examples
   build-depends:
       base
+    , containers
+    , ghc
+    , ghc-paths
+    , liquid-fixpoint
+    , liquid-prelude
+    , liquid-vector
+    , liquidhaskell
+    , liquidhaskell-boot
+    , mtl
+    , vector
+  default-language: Haskell2010
+
+executable Liquid-Haskell-examples
+  main-is: Main.hs
+  other-modules:
+      Paths_Liquid_Haskell_examples
+  hs-source-dirs:
+      app
+  ghc-options: -fplugin-opt=LiquidHaskell:--counter-examples
+  build-depends:
+      Liquid-Haskell-examples
+    , base
     , containers
     , ghc
     , ghc-paths
