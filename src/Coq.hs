@@ -41,6 +41,38 @@ instance Show Def where
       unrefinedApply = unrefName ++ " " ++ unwords (map projectFromSubset args)
 
 
+data Constant = Const {id :: Id, body :: Expr}
+instance Show Constant where
+  show (Const name body) = "Definition " ++ name ++ " := "++ show body ++ ". "
+
+newtype Load = Load {moduleName :: Id}
+instance Show Load where
+  show (Load name) = "Load " ++ name ++ ".v. "
+
+data NewType = NewType {typeName :: Id, defin :: Type}
+instance Show NewType where
+  show (NewType name def) = "Notation " ++ name ++ ":= " ++ show def ++ ". "
+
+data Inductive = Inductive {typeId :: Id, constructors :: [(Id, Type)]}
+instance Show Inductive where
+  show (Inductive typeId constrs) = "Inductive " ++ typeId ++ ": Set := " ++ intercalate " | " (map showBranch constrs) ++ ". " where
+    showBranch (id, typ) = id ++ ": " ++ show typ
+
+data CoqContent = LoadDeclaration Load 
+                | ConstantDeclaration Constant
+                | TypeDeclaration NewType
+                | InductiveDeclaration Inductive
+                | DefinitionDeclaration Def
+                | TheoremDeclaration Theorem
+instance Show CoqContent where
+  show (LoadDeclaration l)        = show l
+  show (ConstantDeclaration c)    = show c
+  show (TypeDeclaration t)        = show t
+  show (InductiveDeclaration ind) = show ind
+  show (DefinitionDeclaration d)  = show d
+  show (TheoremDeclaration thm)   = show thm
+
+
 data Pat = Pat {patCon :: Id, patArgs :: [Id]}
 
 instance Show Pat where
@@ -77,11 +109,12 @@ showAppArg e = show e
 destructSubsetArg :: CoqArg -> Tactic
 destructSubsetArg (name, ty, refts) = Destruct (Var name) [[name, name++"p"]] []
 
-data Type = TExpr Expr | TProp Prop | RExpr Id Expr Prop
+data Type = TExpr Expr | TProp Prop | RExpr Id Expr Prop | TFun Type Type
 instance Show Type where
   show (TExpr e) = show e
   show (TProp p) = show p
   show (RExpr id typ refts) = "{"++ id ++ ": " ++ show typ ++ "| " ++ show refts ++"}"
+  show (TFun dom codom) = addParens $ show dom ++ " -> " ++ show codom
 
 data Prop = PExpr Expr
           | Brel Brel Expr Expr

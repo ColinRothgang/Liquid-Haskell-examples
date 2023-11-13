@@ -1,8 +1,7 @@
 Load LHCoqTactics.
 Inductive N:Set := Z : N | Suc: N -> N. 
 Notation "@ x" := (inject_into_trivial_subset_type N x) (at level 60). 
-
-
+Load /home/colin/Haskell projects/Liquid-Haskell-examples/Examples/IntNatExample.hs.v. 
 Fixpoint toInt_unrefined n :=
   match n with | Z  => I# 0 | Suc n => + Int fNumInt (I# 1) (toInt_unrefined n) end.
 
@@ -80,12 +79,8 @@ Proof.
 destruct n as [n np ]. induction n as [| n mult_zero_r ]. smt_app trivial. smt_app mult_zero_r.
 Qed.
 
-Fixpoint one  :=
-  Suc Z.
-
-Fixpoint two  :=
-  Suc one.
-
+Definition one := Suc Z. 
+Definition two := Suc one. 
 Theorem mult_one_r (n: { v : N | True }): mult n one = n.
 Proof.
 destruct n as [n np ]. induction n as [| n mult_one_r ]. smt_app trivial. smt_app mult_one_r.

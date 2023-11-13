@@ -49,14 +49,17 @@ run args = do
       lhDefs = map CLH.transBind (simplify <$> binds)
       defsAndProofs = parseDefsAndProofs $ pairLHDefsWithSigs lhDefs specMap
 
-    parsedSource <- parseSourceContent inputFolder defsAndProofs src
+    parsedSource <- parseSourceContent (inputFolder, fileName) defsAndProofs src
     let
       Result (state, translatedSourceContent) = translateToCoq parsedSource
-      output = intercalate "\n" (preamble++translatedSourceContent)
+      translatedFile = map show translatedSourceContent
+      output = intercalate "\n" (preamble++translatedFile)
      
     -- mapM_ (putStrLn . show) dataDecls --(putStrLn . (\x -> showSDocUnsafe $ ppr x)) dataDecls
     -- mapM_ (putStrLn . (\x -> showSDocUnsafe $ ppr x)) binds
-    mapM_ print lhDefs
+
+    -- mapM_ print lhDefs
+
     putStrLn $ "\nThe translation to Coq yields: \n" ++ output
     putStrLn $ "Writing output to file at "++outputPath
     writeFile outputPath output
@@ -98,8 +101,8 @@ isIgnoredBind bind = name `startsWith` '$' || name == "?"
         Rec ((b,_):_) -> b
     startsWith xs c = c == head xs
 
-parseSourceContent :: String -> [Either (Either LH.Def (LH.Def, LH.Signature)) LH.Proof] -> LhLib.TargetSrc -> IO [LH.SourceContent]
-parseSourceContent inputFolder defsAndProofs src = do
+parseSourceContent :: (String, String) -> [Either (Either LH.Def (LH.Def, LH.Signature)) LH.Proof] -> LhLib.TargetSrc -> IO [LH.SourceContent]
+parseSourceContent (inputFolder, filename) defsAndProofs src = do
     otherFiles <- getDirectoryContents inputFolder
     let
       otherFilePaths = map ((inputFolder  ++ "/") ++) otherFiles 
@@ -108,7 +111,7 @@ parseSourceContent inputFolder defsAndProofs src = do
     contents <- mapM hGetContents handles
     let
       fileContents = zip sourceFiles contents
-      filteredContents = filter (\(f, content) -> isImported content) fileContents
+      filteredContents = filter (\(f, content) -> isImported content && not (filename `isSubsequenceOf` f)) fileContents
       imports = map (\(f, _) -> LH.Import f) filteredContents
       nonImports = map parseDefsAndProofs defsAndProofs
       sourceContents = imports ++ nonImports
@@ -165,12 +168,18 @@ parseProof (LH.Proof (LH.Def name args body) (LH.Signature sigArgs (LH.LHArg _ _
 -- in particular use it to figure out when we need to inject, project out of/into
 -- subset types.
 -- Such functionality also allows abbreviating {v: T | True} as T by adding required injections/projections
-translateToCoq :: [LH.SourceContent] -> StateResult [String]
-translateToCoq = mapM (fmap (intercalate "\n") . translate) where
-  translate :: LH.SourceContent -> StateResult [String]
-  translate (LH.Import moduleName) = pure []
-  translate (LH.Data n mO branches) = undefined
-  translate (LH.Alias n expr) = pure [show $ C.Def n [] (LH.transExpr expr)] -- pure ["Definition "++n++" := "++ show expr]
+translateToCoq :: [LH.SourceContent] -> StateResult [C.CoqContent]
+translateToCoq srcConts = intercalate [] <$> mapM translate srcConts where
+  translate :: LH.SourceContent -> StateResult [C.CoqContent]
+  translate (LH.Import moduleName) = pure [C.LoadDeclaration $ C.Load moduleName]
+  translate (LH.Data n mO branches) = pure [C.InductiveDeclaration $ C.Inductive n (map translateBranch branches)] where
+    translateBranch :: (Id, [LH.Type]) -> (Id, C.Type)
+    translateBranch (n, argTps) = 
+      let 
+        args = map (C.TExpr . LH.transType) argTps
+        dom:codom = args
+      in (n, foldl C.TFun dom codom)
+  translate (LH.Alias n expr) = pure [C.ConstantDeclaration $ C.Const n (LH.transExpr expr)] -- pure ["Definition "++n++" := "++ show expr]
   translate (LH.Definition name args retrf@(LH.LHArg resId ret post) body) = 
     do
       let 
@@ -188,7 +197,7 @@ translateToCoq = mapM (fmap (intercalate "\n") . translate) where
         refRet = (resId, C.TExpr $ LH.transType ret, LH.transProp post)
         refinedDef = C.RefDef name coqArgs refRet coqDefinien
       registerDefSpecs name coqArgs refRet
-      pure [show unrefinedDef, show refinedDef]
+      pure $ map C.DefinitionDeclaration [unrefinedDef, refinedDef]
   translate (LH.Theorem name args lhClaim body) = 
     do
       let
@@ -198,4 +207,4 @@ translateToCoq = mapM (fmap (intercalate "\n") . translate) where
         tacs = LH.transformTop (LH.Def name argNames body)
         thm = C.Theorem name coqArgs claim tacs
       registerThmSpecs name coqArgs claim
-      pure [show thm]
+      pure [C.TheoremDeclaration thm]
