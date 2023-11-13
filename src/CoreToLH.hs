@@ -3,6 +3,8 @@ module CoreToLH where
 import Prelude
 import GHC.Core
 import qualified Liquid.GHC.Interface() -- show instances for some GHC things.
+import GHC.Types.Literal
+import GHC.Utils.Outputable
 import Data.Bifunctor as B
 
 import qualified LH
@@ -31,7 +33,7 @@ trans l@Lam{}            = error "lambda expression not supported."
 trans (Case e b t alts)  = LH.Case (trans  e) (showStripped b) (map altToClause alts)
 trans c@Cast{}           = error "cast expression not supported."
 trans (Tick tick e)      = trans e -- ignore ticks
-trans (Type t)           = LH.Var "[@type]"
+trans (Type t)           = LH.Var $ showSDocUnsafe (ppr t) -- "[@type]"
 trans c@Coercion{}       = error "coercion expression not supported."
 trans (Let bind e) =
     case e' of
@@ -39,7 +41,10 @@ trans (Let bind e) =
       _     -> LH.Let (show x) (trans e') (trans e)
   where
     (x, e') = deconstructBind bind
-trans l@Lit{} = LH.Var "[@lit]"
+trans (Lit (LitNumber _ n)) = LH.Sym $ show n 
+trans (Lit (LitString s)) = LH.Sym $ show s
+trans (Lit (LitFloat x)) = LH.Sym $ show x
+trans (Lit (LitDouble x)) = LH.Sym $ show x
 -- Deconstruct binds.
 
 deconstructBind :: Bind b -> (b, Expr b)

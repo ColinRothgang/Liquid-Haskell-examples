@@ -2,24 +2,44 @@ module Coq where
 import Util
 import Prelude
 
+type CoqArg = (Id, Type, Prop)
+triviallyRefinedArg :: Id -> Type -> CoqArg
+triviallyRefinedArg id typ = (id, typ, TT)
 
-data Proof = Proof {cpName :: Id, cpArgs :: [(Id, Type, Prop)], cpType :: Prop, cpbody :: [Tactic]}
-instance Show Proof where
-  show (Proof name args ty bod) =
+data Theorem = Theorem {cpName :: Id, cpArgs :: [CoqArg], cpType :: Prop, cpbody :: [Tactic]}
+instance Show Theorem where
+  show (Theorem name args ty bod) =
     "Theorem " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ show ty ++ ".\n"
     ++ "Proof.\n"
     ++ unwords (map (show . destructSubsetArg) args)
     ++ intercalate ". " (map show bod) ++ ".\n"
     ++ "Qed.\n"
 -- data Proof = IndProof {bod :: ProofBod  , proofIndArg :: (Id,Int)} | NIndProof {bod :: PrBod}
-showArg :: (Id,Type, Prop) -> String
+showArg :: CoqArg -> String
 showArg (arg, t, p) = addParens $ (arg ++ ": { v : " ++ show t ++ " | " ++ show p ++ " }")
 
-data Def = Def {defName :: Id, defArgs:: [Id], defBody :: Expr}
+unrefinedName :: Id -> Id
+unrefinedName s = s ++ "_unrefined"
+
+injectIntoSubset :: Id -> String
+injectIntoSubset t = addParens $ "# "++ t
+
+projectFromSubset :: CoqArg -> String
+projectFromSubset (id, _, _) = addParens $ "` "++ id
+
+data Def = Def {defName :: Id, defArgs:: [Id], defBody :: Expr} | RefDef {name :: Id, args:: [CoqArg], ret:: CoqArg, defBody :: Expr}
 instance Show Def where
   show (Def name args body) =
     "Fixpoint " ++ name ++ " " ++ unwords args ++ " :=\n"
     ++ "  " ++ show body ++ ".\n"
+  show (RefDef name args (resId, ret, post) body) = refinedDef where
+      unrefName = unrefinedName name
+      argsList = unwords (map showArg args)
+      retWithRefts refts = " {"++ resId ++ ":" ++ show ret ++ " | " ++ refts ++ " }"
+      refinedDefinien = "Proof.\n  " ++ unwords (map (show . destructSubsetArg) args) ++ "\n" ++ "  exact (exist (" ++ unrefinedApply ++ ") eq_refl). \n" ++ "Defined.\n"
+      refinedDef = "Fixpoint " ++ name ++ " " ++ argsList ++ ": " ++ retWithRefts ("v = " ++ unrefinedApply) ++ " .\n" ++ refinedDefinien
+      unrefinedApply = unrefName ++ " " ++ unwords (map projectFromSubset args)
+
 
 data Pat = Pat {patCon :: Id, patArgs :: [Id]}
 
@@ -29,15 +49,23 @@ instance Show Pat where
 data Expr = App Id [Expr]
           | Var Id
           | Match Expr Id [(Pat, Expr)]
+          | MatchSimple Expr [(Pat, Expr)]
           | Let Id Expr Expr
+          | Sym String
 
 instance Show Expr where
-  show (App f []) = filterWeird f
-  show (App f es) = f ++ " " ++ unwords (map showAppArg es)
-  show (Var id) = filterWeird id
-  show (Let id b e) = "let " ++ filterWeird id ++ " := " ++ show b ++ " in " ++ show e
+  show (Sym s)        = s
+  show (App f [])     = filterWeird f
+  show (App f es)     = f ++ " " ++ unwords (map showAppArg es)
+  show (Var id)       = filterWeird id
+  show (Let id b e)   = "let " ++ filterWeird id ++ " := " ++ show b ++ " in " ++ show e
   show (Match e id branches) =
       "match " ++ show e ++ " as " ++ filterWeird id ++ " with "
+      ++ unwords (map showBranch branches) ++ " end"
+    where
+      showBranch (p, e) = "| " ++ show p ++ " => " ++ show e
+  show (MatchSimple e branches) =
+      "match " ++ show e ++ " with "
       ++ unwords (map showBranch branches) ++ " end"
     where
       showBranch (p, e) = "| " ++ show p ++ " => " ++ show e
@@ -46,21 +74,31 @@ showAppArg :: Expr -> String
 showAppArg app@(App _ (_:_)) = addParens $ show app
 showAppArg e = show e
 
-destructSubsetArg :: (Id,Type, Prop) -> Tactic
+destructSubsetArg :: CoqArg -> Tactic
 destructSubsetArg (name, ty, refts) = Destruct (Var name) [[name, name++"p"]] []
 
-data Type = TExpr Expr | TProp Prop | RExpr Expr Prop
+data Type = TExpr Expr | TProp Prop | RExpr Id Expr Prop
 instance Show Type where
   show (TExpr e) = show e
   show (TProp p) = show p
+  show (RExpr id typ refts) = "{"++ id ++ ": " ++ show typ ++ "| " ++ show refts ++"}"
 
 data Prop = PExpr Expr
           | Brel Brel Expr Expr
           | And [Prop]
+          | Impl Prop Prop
+          | Neg Prop
+          | TT
+          | FF
+
 instance Show Prop where
   show (PExpr e) = show e
-  show (Brel brel e1 e2) = show e1 ++ " = " ++ show e2
-  show (And ps) = intercalate " /\\ " $ map show ps
+  show (Brel brel e1 e2)  = show e1 ++ " = " ++ show e2
+  show (And ps)           = intercalate " /\\ " $ map show ps
+  show (Impl ante concl)  = show ante ++ "->" ++ show concl
+  show (Neg form)         = "not" ++ addParens (show form)
+  show TT                 = "True"
+  show FF                 = "False"
 
 data Brel = Eq
 instance Show Brel where show Eq = "="

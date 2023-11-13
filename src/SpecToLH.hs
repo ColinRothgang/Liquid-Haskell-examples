@@ -15,9 +15,19 @@ transCon (RTyCon tc pvars info) = LH.TDat (showppStripped tc) $ map (LH.TVar . s
 showppStripped :: PPrint a => a -> String
 showppStripped = strip . showpp
 
+-- SpecType = RType RTyCon RTyVar RReft
 retType :: SpecType -> LH.LHArg
 retType (RFun _ _ _ t_out _) = retType t_out
-retType t = LH.LHArg "@retType" `uncurry` trans t
+retType (RImpF _ _ _ t_out _) = retType t_out
+retType (RAllT _ _ _) = undefined
+retType (RAllP _ _) = undefined
+retType t@RApp {} = LH.LHArg "v" `uncurry` trans t
+retType (RAllE _ _ _) = undefined
+retType (REx _ _ _) = undefined
+retType (RExprArg _) = undefined
+retType (RAppTy _ _ _) = undefined
+retType (RRTy _ _ _ _) = undefined
+retType t = error $ "unsupported spec: "++ show t
 
 -- isProof :: SpecType -> Bool
 -- isProof t = showppStripped (rt_bind (retType t)) == "()"
@@ -37,12 +47,16 @@ transRReft = B.bimap showppStripped transExpr . unreft . ur_reft
 
 unreft (F.Reft t) = t
 transExpr :: F.Expr -> LH.LHExpr
-transExpr (F.PAtom brel e1 e2) = LH.Brel (transBrel brel) (transExpr e1) (transExpr e2)
-transExpr app@F.EApp{}         = uncurry LH.LHApp $ flattenApp app
-transExpr (F.EVar sym)         = LH.LHVar (showppStripped sym)
-transExpr (F.PAnd [])          = LH.LHVar "True"
-transExpr (F.PAnd [e])         = transExpr e
-transExpr (F.PAnd es)          = LH.And $ map transExpr es
+transExpr (F.PAtom brel e1 e2)  = LH.Brel (transBrel brel) (transExpr e1) (transExpr e2)
+transExpr app@F.EApp{}          = uncurry LH.LHApp $ flattenApp app
+transExpr (F.EVar sym)          = LH.LHVar (showppStripped sym)
+transExpr (F.PAnd [])           = LH.LHVar "True"
+transExpr (F.PAnd [e])          = transExpr e
+transExpr (F.PAnd es)           = LH.And $ map transExpr es
+transExpr (F.PIff ante concl)   = LH.LHImpl (transExpr ante) $ transExpr concl
+transExpr (F.ESym sym)          = LH.LHSym $ show sym
+transExpr (F.ECon c)            = LH.LHSym $ show c
+transExpr (F.ENeg form)         = LH.LHNeg $ transExpr form
 transExpr e = error $ "undefined expr translation: \n"
                     ++ showpp e
 

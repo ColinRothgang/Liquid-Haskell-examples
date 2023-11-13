@@ -26,6 +26,8 @@ dependencies:
   - mtl
   - ghc
   - ghc-paths
+  - directory
+  - unordered-containers
 
 library:
   source-dirs:

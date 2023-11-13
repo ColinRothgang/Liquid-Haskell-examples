@@ -21,13 +21,14 @@ import Language.Haskell.Liquid.ProofCombinators
 data N = Z | Suc N deriving Eq
 
 {-@ measure toInt @-}
-{-@ toInt :: N -> {v:Int | v >= 0} @-}
+{-@ toInt :: n:N -> {v:Int | v >= 0} @-}
 toInt :: N -> Int
 toInt Z = 0
 toInt (Suc n) = 1 + toInt n
 
 -- | Addition of natural numbers
 {-@ reflect add @-}
+{-@ add :: m:N -> n:N -> N @-}
 add :: N -> N -> N
 add Z n = n
 add (Suc m) n = Suc (add m n)
@@ -70,6 +71,7 @@ add_assoc (Suc m) n o = add_assoc m n o
 
 -- | Multiplication of natural numbers
 {-@ reflect mult @-}
+{-@ mult :: m:N -> n:N -> N @-}
 mult :: N -> N -> N
 mult Z n = Z
 mult (Suc m) n = n `add` (mult m n)
