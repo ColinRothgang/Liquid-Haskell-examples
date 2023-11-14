@@ -20,20 +20,20 @@ transBind  (Rec ((b,e): _)) =
 -- Expressions.
 trans :: Show b => Expr b -> LH.Expr
 trans (Var id)  | name == "()" = LH.Unit
-                | otherwise = LH.Var name
+                | otherwise = LH.Term $ LH.LHVar name
                 where name = showStripped id
 trans app@App{}
   | name == "?" = LH.QMark first second
   | name == "patError" = LH.Unit -- patError parts replaced by trivial.
   | name == "()" = LH.Unit
-  | otherwise   = LH.App name args
+  | otherwise   = LH.Term $ LH.LHApp name (map LH.Evaluate args)
   where (name, args)     = flattenApp app
         (_:_:first:second:_) = args
 trans l@Lam{}            = error "lambda expression not supported."
 trans (Case e b t alts)  = LH.Case (trans  e) (showStripped b) (map altToClause alts)
 trans c@Cast{}           = error "cast expression not supported."
 trans (Tick tick e)      = trans e -- ignore ticks
-trans (Type t)           = LH.Var $ showSDocUnsafe (ppr t) -- "[@type]"
+trans (Type t)           = LH.Term. LH.LHVar $ showSDocUnsafe (ppr t) -- "[@type]"
 trans c@Coercion{}       = error "coercion expression not supported."
 trans (Let bind e) =
     case e' of
@@ -41,10 +41,10 @@ trans (Let bind e) =
       _     -> LH.Let (show x) (trans e') (trans e)
   where
     (x, e') = deconstructBind bind
-trans (Lit (LitNumber _ n)) = LH.Sym $ show n 
-trans (Lit (LitString s)) = LH.Sym $ show s
-trans (Lit (LitFloat x)) = LH.Sym $ show x
-trans (Lit (LitDouble x)) = LH.Sym $ show x
+trans (Lit (LitNumber _ n)) = LH.Term . LH.LHSym $ show n 
+trans (Lit (LitString s)) = LH.Term . LH.LHSym $ show s
+trans (Lit (LitFloat x)) = LH.Term . LH.LHSym $ show x
+trans (Lit (LitDouble x)) = LH.Term . LH.LHSym $ show x
 -- Deconstruct binds.
 
 deconstructBind :: Bind b -> (b, Expr b)

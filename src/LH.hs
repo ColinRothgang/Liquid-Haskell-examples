@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE StandaloneDeriving #-}
 module LH where
 
@@ -7,19 +8,17 @@ import qualified Coq as C
 
 import qualified Data.Map as M
 import Control.Monad.Reader
-import Data.List(findIndex)
+import Data.List(findIndex,find)
 import Util
 import qualified Data.Bifunctor as B
 
 data Proof = Proof Def Signature deriving Show
 data Def = Def {defName :: Id, defArgs:: [Id], defBody :: Expr} deriving Show
-data Expr = App Id [Expr]
-          | Var Id
+data Expr = Term LHExpr
           | QMark Expr Expr
           | Unit
           | Case Expr Id [(Pat, Expr)]
           | Let Id Expr Expr
-          | Sym String
           deriving Show
 instance Eq Expr where 
   (==) expr expr2 = show expr == show expr2
@@ -42,6 +41,7 @@ data LHExpr = And [LHExpr]
             | LHApp Id [LHExpr]
             | LHVar Id
             | LHSym String
+            | Evaluate Expr
             deriving Show
 instance Eq LHExpr where 
   (==) expr expr2 = show expr == show expr2
@@ -50,6 +50,37 @@ data Brel = Eq deriving Show
 
 data LHArg = LHArg { lhArgName :: Id, lhArgType :: Type, lhArgReft :: LHExpr} deriving Show
 data Signature = Signature {sigArgs :: [LHArg], sigRes :: LHArg} deriving Show
+
+data TranslationMode = DefinitionMode | ProofMode | DefProofMode deriving (Eq, Show)
+data InternalState = State {defSpecs:: [(Id, [C.CoqArg], C.CoqArg)], thmSpecs:: [(Id, [C.CoqArg], C.Prop)], datatypeMeasures:: [(Id, Id)], warnings :: [String], mode :: TranslationMode} deriving Show
+emptyState :: InternalState
+emptyState = State [] [] [] [] DefinitionMode
+
+concatState :: InternalState -> InternalState -> InternalState
+concatState (State dsp1 tsp1 m1 w1 _) (State dsp2 tsp2 m2 w2 f)= State (dsp1 ++ dsp2) (tsp1 ++ tsp2) (m1 ++ m2) (w1 ++ w2) f
+
+data StateResult a where
+  Result :: (InternalState, a) -> StateResult a
+deriving instance Show a => Show (StateResult a)
+instance Functor StateResult where
+  fmap f (Result (state, x)) = Result (state, f x)
+instance Applicative StateResult where
+  pure x = Result (emptyState, x)
+  (<*>) (Result (fState, f)) (Result (xState, x)) = Result (concatState fState xState, f x) 
+instance Monad StateResult where
+  (>>=) (Result (state, x)) statefulF = Result (concatState state fState, fRes) where
+    (Result (fState, fRes)) = statefulF x
+
+registerDefSpecs :: Id -> [C.CoqArg] -> C.CoqArg -> StateResult ()
+registerDefSpecs name args ret = Result (State [(name, args, ret)] [] [] [] DefinitionMode, ())
+
+registerThmSpecs :: Id -> [C.CoqArg] -> C.Prop -> StateResult ()
+registerThmSpecs name args claim = Result (State [] [(name, args, claim)] [] [] ProofMode, ())
+
+definitionModeState = State [] [] [] [] DefinitionMode
+registerDefinitionMode = Result (definitionModeState, ())
+registerProofMode = Result (State [] [] [] [] ProofMode, ())
+registerDefProofMode = Result (State [] [] [] [] DefProofMode, ())
 
 renameSigArgs :: [Id] -> Signature -> Signature
 renameSigArgs args (Signature sArgs res) =
@@ -70,73 +101,111 @@ renameReft (And es)       = And     <$> mapM renameReft es
 renameReft (Brel b e1 e2) = Brel b  <$> renameReft e1 <*> renameReft e2
 renameReft (LHApp id es)  = LHApp   <$> rename id <*> mapM renameReft es
 renameReft (LHVar id)     = LHVar   <$> rename id
+renameReft (Evaluate expr)= Evaluate<$> renameExpr expr 
+renameReft (LHImpl e1 e2) = LHImpl  <$> renameReft e1 <*> renameReft e2
+renameReft (LHNeg e)      = LHNeg   <$> renameReft e
+renameReft (LHSym s)      = pure $ LHSym s
 
 renamePat :: Pat -> Reader Renames Pat
 renamePat (Pat patCon patArgs) = Pat <$> rename patCon <*> mapM rename patArgs
 
 renameExpr :: Expr -> Reader Renames Expr
-renameExpr (App id exprs)       = App   <$> rename id <*> mapM renameExpr exprs
-renameExpr (Var id)             = Var   <$> rename id
+renameExpr (Term lhExpr)        = Term  <$> renameReft lhExpr
 renameExpr (QMark expr expr2)   = QMark <$> renameExpr expr <*> renameExpr expr2
 renameExpr Unit                 = pure Unit
 renameExpr (Case expr id branches)  = Case <$> renameExpr expr <*> rename id <*> mapM (\(pat, expr) -> (\x y -> (x,y)) <$> renamePat pat <*> renameExpr expr) branches
 renameExpr (Let id expr expr2)  = Let   <$> rename id <*> renameExpr expr <*> renameExpr expr2
-renameExpr (Sym s)              = pure $ Sym s
 
 rename :: Id -> Reader Renames Id
-rename name = ask <&> (fromMaybe name . M.lookup name)
+rename name = asks (fromMaybe name . M.lookup name)
 
+refineApplyWrapper :: (a-> C.Expr) -> (InternalState -> Id -> a -> Bool) -> InternalState -> Id -> [a] -> C.Expr
+refineApplyWrapper transTm isSubsetTerm s = C.refineApplyGeneric (allSpecs s) transTm isSubsetTm where
+  allSpecs s = map (\(x,y,_) -> (x,y)) (defSpecs s) ++ map (\(x,y,_) -> (x,y)) (thmSpecs s)
+  isSubsetTm _ = isSubsetTerm s
 
-transLH :: Proof -> C.Theorem
-transLH (Proof def@(Def name dArgs body) sig) =
-    C.Theorem name args (transResLHArg res) (transformTop def)
+isSubsetTermExpr :: InternalState -> Id -> C.Expr -> Bool
+isSubsetTermExpr s id (C.Inject (C.RExpr _ _ C.TT) x _) = isSubsetTermExpr s id x
+isSubsetTermExpr _ _ C.Inject {} = True
+isSubsetTermExpr s _  _| mode s == ProofMode = False
+isSubsetTermExpr s _  _| mode s == DefProofMode = False
+isSubsetTermExpr s id exp@(C.Var n) = 
+  let
+    funcSpec = snd <$> find (\(x,_) -> x == id) (map (\(x,y,_) -> (x,y)) (defSpecs s) ++ map (\(x,y,_) -> (x,y)) (thmSpecs s))
+    argSpec = find (\(x,_,_) -> x == n) =<< funcSpec
+  in not $ null argSpec
+isSubsetTermExpr s id exp@(C.App n exprs) | not $ null (find (\(x, _, _) -> x == id) $ defSpecs s) = 
+  let
+    funSpec = fromJust $ find (\(x,_, _) -> x == id) (defSpecs s)
+    (_, _, (_, _, prop)) = funSpec
+  in prop /= C.TT
+isSubsetTermExpr _ _ _ = False
+
+refineApplyArg :: InternalState -> Id -> [C.CoqArg] -> C.Expr
+refineApplyArg = refineApplyWrapper transTm (const C.isSubsetTermCoqArg) where
+  transTm :: C.CoqArg -> C.Expr
+  transTm (n, typ, ref) = C.Var n
+
+refineApply :: InternalState -> Id -> [C.Expr] -> C.Expr
+refineApply = refineApplyWrapper id isSubsetTermExpr
+
+refineApplyLH :: InternalState -> Id -> [LHExpr] -> C.Expr
+refineApplyLH s id args = refineApply s id $ map (transLHExpr s) args
+
+transLH :: InternalState -> Proof -> C.Theorem
+transLH s (Proof def@(Def name dArgs body) sig) =
+    C.Theorem name args (transResLHArg s res) (transformTop s def)
   where
     Signature sigArgs res = renameSigArgs dArgs sig
-    args = map transLHArg sigArgs
+    args = map (transLHArg s) sigArgs
 
-transLHArg :: LHArg -> C.CoqArg
-transLHArg (LHArg name ty reft) = (name, C.TExpr $ transType ty, transProp reft)
+transLHArg :: InternalState -> LHArg -> C.CoqArg
+transLHArg s (LHArg name ty reft) = (name, C.TExpr $ transType s ty, transProp s reft)
 
-transResLHArg :: LHArg -> C.Prop
-transResLHArg (LHArg _ _ reft) = transProp reft
+transResLHArg :: InternalState -> LHArg -> C.Prop
+transResLHArg s (LHArg _ _ reft) = transProp s reft
 
-transType :: Type -> C.Expr
-transType (TVar tv) = C.Var tv
-transType (TDat con tys) = C.App con $ map transType tys
+transType :: InternalState -> Type -> C.Expr
+transType _ (TVar tv) = C.Var tv
+transType s (TDat con tys) = C.App con $ map (transType s) tys
+
+transFuncType :: InternalState -> [Type] -> C.Type
+transFuncType s argTps = foldr C.TFun dom codom where
+    args = map (C.TExpr . transType s) argTps
+    dom:codom = args
 
 transPat :: Pat -> C.Pat
 transPat (Pat con args) = C.Pat con args
 
-transExpr :: Expr -> C.Expr
-transExpr (App f es) = C.App f $ map transExpr es
-transExpr (Var x)    = C.Var $ handleId x
+transExpr :: InternalState -> Expr -> C.Expr
+transExpr s (Term x)   = transLHExpr s x
   where
     handleId = \case
       "True"  -> "True"
       "False" -> "False"
       other   -> other
-transExpr (Let id e1 e2)  = C.Let id (transExpr e1) (transExpr e2)
+transExpr s (Let id e1 e2)  = C.Let id (transExpr s e1) (transExpr s e2)
 -- only add match pattern "as b" if match branches use b
-transExpr (Case e b bs) | any (\(_, x) -> x `dependsOn` b) bs = C.Match (transExpr e) b $ map (B.bimap transPat transExpr) bs
-transExpr (Case e _ bs) = C.MatchSimple (transExpr e) $ map (B.bimap transPat transExpr) bs
-transExpr Unit            = C.Var "()"
-transExpr (QMark e1 e2)   = C.App "(?)" $ map transExpr [e1,e2]
-transExpr (Sym s)         = C.Sym s
+transExpr s (Case e b bs) | any (\(_, x) -> x `dependsOn` b) bs = C.Match (transExpr s e) b $ map (B.bimap transPat $ transExpr s) bs
+transExpr s (Case e _ bs) = C.MatchSimple (transExpr s e) $ map (B.bimap transPat $ transExpr s) bs
+transExpr _ Unit            = C.Var "()"
+transExpr s (QMark e1 e2)   = C.App "(?)" $ map (transExpr s) [e1,e2]
 
-transProof :: Expr -> [C.Tactic]
-transProof (Var x) = [C.Apply (C.Var x)]
-transProof (App f es) = C.Apply (C.App f (map transExpr es')): concatMap transProof ps
+transProof :: InternalState -> Expr -> [C.Tactic]
+transProof s (Term t) | mode s == DefProofMode = [C.ExactSubsetDef (transLHExpr s t)]
+transProof s (Term (LHApp f es)) = C.Apply (refineApply s f (map (transExpr s) es')): concatMap (transProof s) ps
     where
-      (es', ps) = B.second catMaybes . unzip $ map getQMark es
+      (es', ps) = B.second catMaybes . unzip $ map (getQMark . Term) es
       getQMark :: Expr -> (Expr, Maybe Expr)
       getQMark (QMark e1 e2) = (e1, Just e2)
       getQMark e             = (e,Nothing)
+transProof s (Term t) = [C.Apply (transLHExpr s t)]
 
-transProof (QMark e1 e2) = concatMap transProof [e1,e2]
-transProof Unit = [C.Trivial]
-transProof (Let id e1 e2) = [C.LetTac id (head $ transProof e1) (head $ transProof e2)]
-transProof (Case e _ bs) =
-    [C.Destruct (transExpr e) (map patArgs pats) (map transProof es)]
+transProof s (QMark e1 e2) = concatMap (transProof s) [e1,e2]
+transProof _ Unit = [C.Trivial]
+transProof s (Let id e1 e2) = [C.LetTac id (head $ transProof s e1) (head $ transProof s e2)]
+transProof s (Case e _ bs) =
+    [C.Destruct (transExpr s e) (map patArgs pats) (map (transProof s) es)]
   where
     (pats, es) = unzip bs
 
@@ -144,19 +213,21 @@ transProof (Case e _ bs) =
 transBrel :: Brel -> C.Brel
 transBrel Eq = C.Eq
 
-transLHExpr :: LHExpr -> C.Expr
-transLHExpr (LHApp f es)  = C.App f $ map transLHExpr es
-transLHExpr (LHVar x)     = C.Var x
-transLHExpr (LHSym s)     = C.Sym s
-transLHExpr e             = error "not an expression."
+transLHExpr :: InternalState -> LHExpr -> C.Expr
+transLHExpr s (LHApp f es)  = refineApplyLH s f es
+transLHExpr s (LHVar x)     = C.Var x
+transLHExpr _ (LHSym s)     = C.Sym s
+transLHExpr s (Evaluate (Term t)) = transLHExpr s t
+transLHExpr s (Evaluate t)  = transExpr s t
+transLHExpr s e             = error "not an expression."
 
-transProp :: LHExpr -> C.Prop
-transProp (Brel brel e1 e2)     = C.Brel (transBrel brel) (transLHExpr e1) (transLHExpr e2)
-transProp (LHNeg form)          = C.Neg $ transProp form
-transProp (And es)              = C.And $ map transProp es
-transProp (LHApp f es)          = C.PExpr $ C.App f $ map transLHExpr es
-transProp (LHVar x)             = C.PExpr $ C.Var x
-transProp (LHImpl ante concl)   = C.Impl (transProp ante) $ transProp concl
+transProp :: InternalState -> LHExpr -> C.Prop
+transProp s (Brel brel e1 e2)     = C.Brel (transBrel brel) (transLHExpr s e1) (transLHExpr s e2)
+transProp s (LHNeg form)          = C.Neg $ transProp s form
+transProp s (And es)              = C.And $ map (transProp s) es
+transProp s (LHApp f es)          = C.PExpr $ refineApply s f $ map (transLHExpr s) es
+transProp s (LHVar x)             = C.PExpr $ C.Var x
+transProp s (LHImpl ante concl)   = C.Impl (transProp s ante) $ transProp s concl
 
 data Environment =  Env
   { envName :: Id
@@ -172,29 +243,29 @@ askIds = asks envArgs
 
 checkInductiveCall :: M.Map Id Int -> [(Expr, Int)] -> Maybe Arg
 checkInductiveCall _ [] = Nothing
-checkInductiveCall indVars allArgs@((Var arg,pos):args) =
+checkInductiveCall indVars allArgs@((Term (LHVar arg),pos):args) =
   case M.lookup arg indVars of
     Just x | x == pos -> Just (pos,arg)
     _                 -> checkInductiveCall indVars args
 checkInductiveCall indVars (_:args) = checkInductiveCall indVars args
 
-transformTop :: Def -> [C.Tactic]
-transformTop def@(Def name args e) =
-    case runReader (transformInductive e) env of
-      Nothing        -> transBranch e
-      Just (arg, e') -> transIndDef (Def name args e') arg
+transformTop :: InternalState -> Def -> [C.Tactic]
+transformTop s def@(Def name args e) =
+    case runReader (transformInductive s e) env of
+      Nothing        -> transBranch s e
+      Just (arg, e') -> transIndDef s (Def name args e') arg
   where
     env = Env name (M.fromList $ zip args [0..]) M.empty
 
 type Arg = (Int,Id)
-transformInductive :: Expr -> Reader Environment (Maybe (Arg,Expr))
-transformInductive (Let x e1 e2) = do
-    ind1 <- transformInductive e1
-    ind2 <- transformInductive e2
+transformInductive :: InternalState -> Expr -> Reader Environment (Maybe (Arg,Expr))
+transformInductive s (Let x e1 e2) = do
+    ind1 <- transformInductive s e1
+    ind2 <- transformInductive s e2
     return $ case ind1 of
                 Nothing       -> fmap (Let x e1) <$> ind2
                 Just (ind, e) -> Just (ind, Let x e e2)
-transformInductive (Case (Var matchId) ident branches) = do
+transformInductive s (Case (Term (LHVar matchId)) ident branches) = do
     Env{envName=name, envArgs=args} <- ask
     let n = fromMaybe (error $ "Non-existent id: "++matchId++" in "++intercalate "|" (map (\(id, n) -> id ++ " -> "++ show n) $ M.toList args)) (M.lookup matchId args)
     mInds <- forM branches $ \(Pat con args, e) ->
@@ -202,38 +273,41 @@ transformInductive (Case (Var matchId) ident branches) = do
                   []    -> return Nothing
                   {- here we assume that induction happens on the
                   first argument of the constructor. -}
-                  (x:_) -> local (addInd x n) (transformInductive e)
+                  (x:_) -> local (addInd x n) (transformInductive s e)
     let
       mIdx                = findIndex isJust mInds
       (mIndArg, mIndExpr) = unzipMaybe $ fromJust . (mInds !!) <$> mIdx
       mBranches           = modifyAt branches <$> mIdx <*>
           pure (replaceExprWith (fromJust mIndExpr))
-    return $ (,) <$> mIndArg <*> (Case (Var matchId) ident <$> mBranches)
+    return $ (,) <$> mIndArg <*> (Case (Term (LHVar matchId)) ident <$> mBranches)
   where
     replaceExprWith :: Expr -> (Pat, Expr) -> (Pat,Expr)
     replaceExprWith e' (pat,e) = (pat,e')
-transformInductive app@(App f args) = do
+transformInductive s app@(Term (LHApp f lhArgs)) = 
+  let args = map Term lhArgs in
+  do
     Env{envName=name, envIndVars=indVars} <- ask
-    indFromArgs <- mapM transformInductive args
-    let indFromApp = checkInductiveCall indVars (zip args [0..])
+    indFromArgs <- mapM (transformInductive s) args
+    let 
+      indFromApp = checkInductiveCall indVars (zip args [0..])
     return $
       if f == name then
-        fmap (\arg@(pos,_) -> (arg, App f (deleteAt args pos))) indFromApp
+        fmap (\arg@(pos,_) -> (arg, Term (LHApp f (deleteAt lhArgs pos)))) indFromApp
       else
-        let modifyArg ix = B.second (setAt args ix) . fromJust $ indFromArgs!!ix
-        in  fmap (App f) . modifyArg <$> findIndex isJust indFromArgs
-transformInductive (QMark e1 e2) = do
-    mInd1 <- transformInductive e1
+        let modifyArg ix = B.second (setAt lhArgs ix . Evaluate) . fromJust $ indFromArgs!!ix
+        in  fmap (Term . LHApp f) . modifyArg <$> findIndex isJust indFromArgs
+transformInductive s (QMark e1 e2) = do
+    mInd1 <- transformInductive s e1
     case mInd1 of
       Just (arg, e1') -> return $ Just (arg, QMark e1' e2)
       Nothing -> do
-        mInd2 <- transformInductive e2
+        mInd2 <- transformInductive s e2
         return $ (\ (arg, e2') -> Just (arg, QMark e1 e2')) =<< mInd2
-transformInductive _ = return Nothing
+transformInductive _ _ = return Nothing
 
-transIndDef :: Def -> Arg -> [C.Tactic]
-transIndDef (Def name args (Case (Var ind) _ [(_,e1), (_,e2)])) (pos, var) =
-    revertArgs ?: [induction [intros ?: transBranch e1, intros ?: transBranch e2]]
+transIndDef :: InternalState -> Def -> Arg -> [C.Tactic]
+transIndDef s (Def name args (Case (Term (LHVar ind)) _ [(_,e1), (_,e2)])) (pos, var) =
+    revertArgs ?: [induction [intros ?: transBranch s e1, intros ?: transBranch s e2]]
   where
     notNullApply :: ([a] -> b) -> [a] -> Maybe b
     notNullApply f args = toMaybe (notNull args) (f args)
@@ -242,18 +316,10 @@ transIndDef (Def name args (Case (Var ind) _ [(_,e1), (_,e2)])) (pos, var) =
     allArgs = nonIndArgs
     nonIndArgs = deleteAt args pos
     induction = C.Induction (args !! pos) var name
-transIndDef def _ = error $ "unhandled proof case of " ++ show def
+transIndDef _ def _ = error $ "unhandled proof case of " ++ show def
 
-transBranch :: Expr -> [C.Tactic]
-transBranch = updateLast C.toSolve . transProof
-
--- TODO: translate to two definitions in Coq one without refinements and one with that is 
--- specified with refinement and defined (in proof mode) as the one without
-transDef :: Either Def (Def, Signature) -> C.Def
-transDef (Left (Def name args body)) = C.Def name args (transExpr body)
-transDef (Right (Def name args body, Signature sigArgs sigRet)) = C.RefDef name coqArgs coqRet (transExpr body) where
-  coqArgs = map transLHArg sigArgs
-  coqRet = transLHArg sigRet
+transBranch :: InternalState -> Expr -> [C.Tactic]
+transBranch s = updateLast C.toSolve . transProof s
 
 class Dependencies a where
   dependsOn:: a -> Id -> Bool
@@ -270,15 +336,14 @@ instance Dependencies LHExpr where
   dependsOn (LHApp id exprs) name = id == name || any (`dependsOn` name) exprs
   dependsOn (LHVar id) name = id == name
   dependsOn (LHSym s) name = False
+  dependsOn (Evaluate expr) name = expr `dependsOn` name
 
 instance Dependencies Expr where
-  dependsOn (App id exprs) name = id == name || any (`dependsOn` name) exprs
-  dependsOn (Var id) name = id == name
+  dependsOn (Term t) name = t `dependsOn` name
   dependsOn (QMark expr expr2) name = dependsOn expr name || dependsOn expr2 name
   dependsOn Unit name = False
   dependsOn (Case expr pat branches) name = dependsOn expr name || any (\((Pat patCon patArgs), expr) -> dependsOn expr name || patCon == name || elem name patArgs) branches
   dependsOn (Let id expr expr2) name = dependsOn expr name || dependsOn expr2 name
-  dependsOn (Sym s) name = False
 
 instance Dependencies LHArg where
   dependsOn (LHArg id t reft) name = dependsOn t name || dependsOn reft name

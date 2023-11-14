@@ -22,11 +22,11 @@ import System.IO
 
 
 import qualified CoreToLH as CLH
-import qualified LH
+import LH
 import qualified Coq as C
 import qualified SpecToLH as SLH
 import           Simplify (simplify)
-import Preamble (preamble)
+import Preamble (lhPreamble)
 import Util
 
 import Debug.Trace
@@ -51,9 +51,10 @@ run args = do
 
     parsedSource <- parseSourceContent (inputFolder, fileName) defsAndProofs src
     let
-      Result (state, translatedSourceContent) = translateToCoq parsedSource
+      lhSource = lhPreamble ++ parsedSource
+      LH.Result (state, translatedSourceContent) = translateToCoq lhSource
       translatedFile = map show translatedSourceContent
-      output = intercalate "\n" (preamble++translatedFile)
+      output = intercalate "\n" translatedFile
      
     -- mapM_ (putStrLn . show) dataDecls --(putStrLn . (\x -> showSDocUnsafe $ ppr x)) dataDecls
     -- mapM_ (putStrLn . (\x -> showSDocUnsafe $ ppr x)) binds
@@ -78,18 +79,18 @@ getBindsAndSpecs args = do
     getSpecPairs :: LhLib.TargetSpec -> [SpecPair]
     getSpecPairs = map (B.bimap showStripped LhLib.val) . LhLib.gsTySigs . LhLib.gsSig
 
-pairLHDefsWithSigs :: [LH.Def] -> M.Map Id LH.Signature -> [(LH.Def, Maybe LH.Signature)]
+pairLHDefsWithSigs :: [Def] -> M.Map Id Signature -> [(Def, Maybe Signature)]
 pairLHDefsWithSigs defs specMap = map single defs
   where
-    single :: LH.Def -> (LH.Def, Maybe LH.Signature)
-    single def@(LH.Def id _ _) =  (def, M.lookup id specMap)
+    single :: Def -> (Def, Maybe Signature)
+    single def@(Def id _ _) =  (def, M.lookup id specMap)
 
-parseDefsAndProofs :: [(LH.Def, Maybe LH.Signature)] -> [Either (Either LH.Def (LH.Def, LH.Signature)) LH.Proof]
+parseDefsAndProofs :: [(Def, Maybe Signature)] -> [Either (Either Def (Def, Signature)) Proof]
 parseDefsAndProofs = map mapIntoEither
   where
     mapIntoEither (def, Nothing) = Left (Left def)
     mapIntoEither (def, Just sig) 
-        | LH.isProof sig = Right $ LH.Proof def sig
+        | isProof sig = Right $ Proof def sig
         | otherwise = Left $ Right (def, sig)
 
 isIgnoredBind :: Show b => Bind b -> Bool
@@ -101,7 +102,7 @@ isIgnoredBind bind = name `startsWith` '$' || name == "?"
         Rec ((b,_):_) -> b
     startsWith xs c = c == head xs
 
-parseSourceContent :: (String, String) -> [Either (Either LH.Def (LH.Def, LH.Signature)) LH.Proof] -> LhLib.TargetSrc -> IO [LH.SourceContent]
+parseSourceContent :: (String, String) -> [Either (Either Def (Def, Signature)) Proof] -> LhLib.TargetSrc -> IO [SourceContent]
 parseSourceContent (inputFolder, filename) defsAndProofs src = do
     otherFiles <- getDirectoryContents inputFolder
     let
@@ -112,10 +113,11 @@ parseSourceContent (inputFolder, filename) defsAndProofs src = do
     let
       fileContents = zip sourceFiles contents
       filteredContents = filter (\(f, content) -> isImported content && not (filename `isSubsequenceOf` f)) fileContents
-      imports = map (\(f, _) -> LH.Import f) filteredContents
+      importedFiles = map (getModuleName . fst) filteredContents
+      imports = map Import importedFiles
       nonImports = map parseDefsAndProofs defsAndProofs
       sourceContents = imports ++ nonImports
-      sortedSourceContents = sortBy (LH.orderSourceContent identifierOrderSource)
+      sortedSourceContents = sortBy (orderSourceContent identifierOrderSource)
     pure $ imports ++ nonImports
     where 
       identifierOrderSource = map (getOccString . tyVarName) (LhLib.giDefVars src)
@@ -124,87 +126,78 @@ parseSourceContent (inputFolder, filename) defsAndProofs src = do
       isImported content = any (`isSubsequenceOf` ("module "++content)) importNames
       parseDefsAndProofs (Left def) = parseDef def
       parseDefsAndProofs (Right prf) = parseProof prf
-    
-data InternalState = State {defSpecs:: [(Id, [C.CoqArg], C.CoqArg)], thmSpecs:: [(Id, [C.CoqArg], C.Prop)], datatypeMeasures:: [(Id, Id)], warnings :: [String]} deriving Show
-emptyState :: InternalState
-emptyState = State [] [] [] []
+      getModuleName :: String -> String
+      getModuleName s = intercalate "." (init $ split '.' (last $ split '/' s))
 
-concatState :: InternalState -> InternalState -> InternalState
-concatState (State dsp1 tsp1 m1 w1) (State dsp2 tsp2 m2 w2)= State (dsp1 ++ dsp2) (tsp1 ++ tsp2) (m1 ++ m2) (w1 ++ w2)
-
-data StateResult a where
-  Result :: (InternalState, a) -> StateResult a
-deriving instance Show a => Show (StateResult a)
-instance Functor StateResult where
-  fmap f (Result (state, x)) = Result (state, f x)
-instance Applicative StateResult where
-  pure x = Result (emptyState, x)
-  (<*>) (Result (fState, f)) (Result (xState, x)) = Result (concatState fState xState, f x) 
-instance Monad StateResult where
-  (>>=) (Result (state, x)) statefulF = Result (concatState state fState, fRes) where
-    (Result (fState, fRes)) = statefulF x
-
-registerDefSpecs :: Id -> [C.CoqArg] -> C.CoqArg -> StateResult ()
-registerDefSpecs name args ret = Result (State [(name, args, ret)] [] [] [], ())
-
-registerThmSpecs :: Id -> [C.CoqArg] -> C.Prop -> StateResult ()
-registerThmSpecs name args claim = Result (State [] [(name, args, claim)] [] [], ())
-
-parseDef :: Either LH.Def (LH.Def, LH.Signature) -> LH.SourceContent
-parseDef (Left (LH.Def name [] body)) = LH.Alias name body
-parseDef (Left (LH.Def name args body)) | not (null args) = error $ "Found definition (of constant/function \"" ++ name ++ "\") without type specification. This is unsupported by the translation. "
-parseDef (Right (LH.Def name args body, LH.Signature sigArgs sigRes)) = LH.Definition name sigArgs sigRes $ runRename body where
+parseDef :: Either Def (Def, Signature) -> SourceContent
+parseDef (Left (Def name [] body)) = Alias name body
+parseDef (Left (Def name args body)) | not (null args) = error $ "Found definition (of constant/function \"" ++ name ++ "\") without type specification. This is unsupported by the translation. "
+parseDef (Right (Def name args body, Signature sigArgs sigRes)) = Definition name sigArgs sigRes $ runRename body where
       zippedArgLists = zip args sigArgs
-      renames = M.fromList $ map (\(n, LH.LHArg argId _ _) -> (n, argId)) zippedArgLists
-      runRename = flip runReader renames . LH.renameExpr
+      renames = M.fromList $ map (\(n, LHArg argId _ _) -> (n, argId)) zippedArgLists
+      runRename = flip runReader renames . renameExpr
 
-parseProof :: LH.Proof -> LH.SourceContent
-parseProof (LH.Proof (LH.Def name args body) (LH.Signature sigArgs (LH.LHArg _ _ reft))) = LH.Theorem name sigArgs reft  $ runRename body where
+parseProof :: Proof -> SourceContent
+parseProof (Proof (Def name args body) (Signature sigArgs (LHArg _ _ reft))) = Theorem name sigArgs reft  $ runRename body where
       zippedArgLists = zip args sigArgs
-      renames = M.fromList $ map (\(n, LH.LHArg argId _ _) -> (n, argId)) zippedArgLists
-      runRename = flip runReader renames . LH.renameExpr
+      renames = M.fromList $ map (\(n, LHArg argId _ _) -> (n, argId)) zippedArgLists
+      runRename = flip runReader renames . renameExpr
 
 -- TODO: use the state information for refinement checking during translation
 -- in particular use it to figure out when we need to inject, project out of/into
 -- subset types.
 -- Such functionality also allows abbreviating {v: T | True} as T by adding required injections/projections
-translateToCoq :: [LH.SourceContent] -> StateResult [C.CoqContent]
-translateToCoq srcConts = intercalate [] <$> mapM translate srcConts where
-  translate :: LH.SourceContent -> StateResult [C.CoqContent]
-  translate (LH.Import moduleName) = pure [C.LoadDeclaration $ C.Load moduleName]
-  translate (LH.Data n mO branches) = pure [C.InductiveDeclaration $ C.Inductive n (map translateBranch branches)] where
-    translateBranch :: (Id, [LH.Type]) -> (Id, C.Type)
-    translateBranch (n, argTps) = 
-      let 
-        args = map (C.TExpr . LH.transType) argTps
-        dom:codom = args
-      in (n, foldl C.TFun dom codom)
-  translate (LH.Alias n expr) = pure [C.ConstantDeclaration $ C.Const n (LH.transExpr expr)] -- pure ["Definition "++n++" := "++ show expr]
-  translate (LH.Definition name args retrf@(LH.LHArg resId ret post) body) = 
+translateToCoq :: [SourceContent] -> StateResult [C.CoqContent]
+translateToCoq srcConts = 
+  let 
+    smap :: [SourceContent] -> (StateResult SourceContent -> StateResult [C.CoqContent]) -> StateResult [C.CoqContent]
+    smap [] _       = pure []
+    smap [x] trans  = trans (pure x)
+    smap (x:xs) trans = foldl combine init xs where
+      init = trans (pure x)
+      combine (Result (s, ys)) x = (ys ++ ) <$> trans (Result (s,x)) 
+  
+  in smap srcConts translate where
+  translate :: StateResult SourceContent -> StateResult [C.CoqContent]
+  translate (Result (state, Import moduleName)) = pure [C.LoadDeclaration $ C.Load moduleName]
+  translate (Result (s, Data n mO branches)) = mapM (translateBranch n s) branches >>= (\br -> pure [C.InductiveDeclaration $ C.Inductive n br]) where
+    translateBranch :: Id -> InternalState -> (Id, [Type]) -> StateResult (Id, C.Type)
+    translateBranch n s (bn, argTps) = 
+      do
+        registerDefSpecs bn coqArgs (bn++"ret", C.TExpr (transType s $ TVar n), C.TT)
+        pure (bn, transFuncType s args)
+        where
+          argsT = map (C.TExpr . transType s) argTps
+          coqArgs = zipWith (\i x -> ("x"++show i, x, C.TT)) [1..] argsT
+          args = argTps ++ [TVar n]
+  translate (Result (s,Alias n expr)) = pure [C.ConstantDeclaration $ C.Const n (transExpr s expr)] -- pure ["Definition "++n++" := "++ show expr]
+  translate (Result (s, Definition name args retrf@(LHArg resId ret post) body)) = 
     do
       let 
-        argNames = map (\(LH.LHArg n _ _) -> n) args 
-        coqArgs = map LH.transLHArg args
+        argNames = map (\(LHArg n _ _) -> n) args
         renames = M.fromList [(name, unrefName)]
-        runRename = flip runReader renames . LH.renameExpr
+        runRename = flip runReader renames . renameExpr
         unrefinedBody = runRename body
-        coqDefinien = LH.transExpr unrefinedBody
+        coqArgs = map (transLHArg s) args
         unrefName = C.unrefinedName name
-        unrefRet = LH.transLHArg retrf
-        unrefinedDef = C.Def unrefName argNames coqDefinien
-      registerDefSpecs unrefName coqArgs unrefRet      
+        definModeS = s `concatState` State [] [] [] [] DefProofMode
+        coqDefinien = transformTop definModeS (Def unrefName argNames unrefinedBody)
+        unrefRet = transLHArg s retrf
+        unrefinedDef = C.SpecDef unrefName coqArgs unrefRet coqDefinien
+      registerDefSpecs unrefName coqArgs unrefRet
       let
-        refRet = (resId, C.TExpr $ LH.transType ret, LH.transProp post)
-        refinedDef = C.RefDef name coqArgs refRet coqDefinien
+        refRet = (resId, C.TExpr $ transType s ret, transProp s post)
+        refinedDef = C.RefDef name coqArgs refRet [(unrefName, coqArgs), (name, coqArgs)]
       registerDefSpecs name coqArgs refRet
-      pure $ map C.DefinitionDeclaration [unrefinedDef, refinedDef]
-  translate (LH.Theorem name args lhClaim body) = 
+      Result (definitionModeState, map C.DefinitionDeclaration [unrefinedDef, refinedDef])
+  translate (Result (s,Theorem name args lhClaim body)) = 
     do
       let
-        argNames = map (\(LH.LHArg n _ _) -> n) args 
-        coqArgs = map LH.transLHArg args
-        claim = LH.transProp lhClaim
-        tacs = LH.transformTop (LH.Def name argNames body)
+        argNames = map (\(LHArg n _ _) -> n) args 
+        coqArgs = map (transLHArg s) args
+        claim = transProp s lhClaim
+        proofModeS = s `concatState` State [] [] [] [] ProofMode
+        tacs = transformTop proofModeS (Def name argNames body)
         thm = C.Theorem name coqArgs claim tacs
       registerThmSpecs name coqArgs claim
-      pure [C.TheoremDeclaration thm]
+      Result (definitionModeState, [C.TheoremDeclaration thm])
