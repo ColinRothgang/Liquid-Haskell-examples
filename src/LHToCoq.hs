@@ -155,7 +155,7 @@ translateToCoq srcConts =
     smap [x] trans  = trans (pure x)
     smap (x:xs) trans = foldl combine init xs where
       init = trans (pure x)
-      combine (Result (s, ys)) x = (ys ++ ) <$> trans (Result (s,x)) 
+      combine (Result (s, ys)) x = let Result (t, y) = trans (Result (s,x)) in Result (s `concatState` t, ys ++ y)
   
   in smap srcConts translate where
   translate :: StateResult SourceContent -> StateResult [C.CoqContent]
@@ -170,34 +170,35 @@ translateToCoq srcConts =
           argsT = map (C.TExpr . transType s) argTps
           coqArgs = zipWith (\i x -> ("x"++show i, x, C.TT)) [1..] argsT
           args = argTps ++ [TVar n]
-  translate (Result (s,Alias n expr)) = pure [C.ConstantDeclaration $ C.Const n (transExpr s expr)] -- pure ["Definition "++n++" := "++ show expr]
+  translate (Result (s,Alias n expr)) = pure [C.ConstantDeclaration $ C.Const n (transExpr s expr)]
   translate (Result (s, Definition name args retrf@(LHArg resId ret post) body)) = 
-    do
-      let 
-        argNames = map (\(LHArg n _ _) -> n) args
-        renames = M.fromList [(name, unrefName)]
-        runRename = flip runReader renames . renameExpr
-        unrefinedBody = runRename body
-        coqArgs = map (transLHArg s) args
-        unrefName = C.unrefinedName name
-        definModeS = s `concatState` State [] [] [] [] DefProofMode
-        coqDefinien = transformTop definModeS (Def unrefName argNames unrefinedBody)
-        unrefRet = transLHArg s retrf
-        unrefinedDef = C.SpecDef unrefName coqArgs unrefRet coqDefinien
-      registerDefSpecs unrefName coqArgs unrefRet
-      let
-        refRet = (resId, C.TExpr $ transType s ret, transProp s post)
-        refinedDef = C.RefDef name coqArgs refRet [(unrefName, coqArgs), (name, coqArgs)]
-      registerDefSpecs name coqArgs refRet
-      Result (definitionModeState, map C.DefinitionDeclaration [unrefinedDef, refinedDef])
+    let 
+      argNames = map (\(LHArg n _ _) -> n) args
+      renames = M.fromList [(name, unrefName)]
+      runRename = flip runReader renames . renameExpr
+      unrefinedBody = runRename body
+      coqArgs = map (transLHArg s) args
+      unrefName = C.unrefinedName name
+      unrefRet = transLHArg s retrf
+      unrefDefState = State [(unrefName, coqArgs, unrefRet)] [] [] [] DefProofMode
+      definModeS = s `concatState` unrefDefState
+      coqDefinien = transformTop definModeS (Def unrefName argNames unrefinedBody)
+      unrefinedDef = C.SpecDef unrefName coqArgs unrefRet coqDefinien
+
+      defnState = definModeS `concatState` definitionModeState
+      unrefApply = LH.projectIfNeeded defnState $ refineApplyArg defnState unrefName coqArgs
+      postRef = C.Brel C.Eq unrefApply (LH.projectIfNeeded defnState $ C.Var resId)
+      refRet = let (resId, typ, _) = unrefRet in (resId, typ, postRef)
+      refDefState = State [(name, coqArgs, refRet)] [] [] [] DefinitionMode
+      refinedDef = C.RefDef name coqArgs refRet [(unrefName, coqArgs), (name, coqArgs)]
+    in Result (unrefDefState `concatState`  refDefState, map C.DefinitionDeclaration [unrefinedDef, refinedDef])
   translate (Result (s,Theorem name args lhClaim body)) = 
-    do
-      let
-        argNames = map (\(LHArg n _ _) -> n) args 
-        coqArgs = map (transLHArg s) args
-        claim = transProp s lhClaim
-        proofModeS = s `concatState` State [] [] [] [] ProofMode
-        tacs = transformTop proofModeS (Def name argNames body)
-        thm = C.Theorem name coqArgs claim tacs
-      registerThmSpecs name coqArgs claim
-      Result (definitionModeState, [C.TheoremDeclaration thm])
+    let
+      argNames = map (\(LHArg n _ _) -> n) args 
+      coqArgs = map (transLHArg s) args
+      claim = transProp s lhClaim
+      prfState = State [] [(name, coqArgs, claim)] [] [] ProofMode
+      proofModeS = s `concatState` prfState
+      tacs = transformTop proofModeS (Def name argNames body)
+      thm = C.Theorem name coqArgs claim tacs
+    in Result (prfState, [C.TheoremDeclaration thm])

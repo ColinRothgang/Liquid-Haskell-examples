@@ -50,7 +50,7 @@ transExpr :: F.Expr -> LH.LHExpr
 transExpr (F.PAtom brel e1 e2)  = LH.Brel (transBrel brel) (transExpr e1) (transExpr e2)
 transExpr app@F.EApp{}          = uncurry LH.LHApp $ flattenApp app
 transExpr (F.EVar sym)          = LH.LHVar (showppStripped sym)
-transExpr (F.PAnd [])           = LH.LHVar "True"
+transExpr (F.PAnd [])           = LH.LHTrue
 transExpr (F.PAnd [e])          = transExpr e
 transExpr (F.PAnd es)           = LH.And $ map transExpr es
 transExpr (F.PIff ante concl)   = LH.LHImpl (transExpr ante) $ transExpr concl

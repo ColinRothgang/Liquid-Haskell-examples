@@ -26,7 +26,7 @@ trans app@App{}
   | name == "?" = LH.QMark first second
   | name == "patError" = LH.Unit -- patError parts replaced by trivial.
   | name == "()" = LH.Unit
-  | otherwise   = LH.Term $ LH.LHApp name (map LH.Evaluate args)
+  | otherwise   = LH.Term $ LH.LHApp name (map LH.evaluate args)
   where (name, args)     = flattenApp app
         (_:_:first:second:_) = args
 trans l@Lam{}            = error "lambda expression not supported."

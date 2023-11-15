@@ -21,8 +21,12 @@ instance Show Theorem where
 
 -- data Proof = IndProof {bod :: ProofBod  , proofIndArg :: (Id,Int)} | NIndProof {bod :: PrBod}
 showArg :: CoqArg -> String
-showArg (arg, t, prop) | show prop == "True" = addParens $ arg ++ ": " ++ show t
-showArg (arg, t, p) = addParens $ (arg ++ ": { v : " ++ show t ++ " | " ++ show p ++ " }")
+showArg (arg, t, prop) | isTrivial prop = addParens $ arg ++ ": " ++ show t
+showArg (arg, t, p) = addParens (arg ++ ": { v : " ++ show t ++ " | " ++ show p ++ " }")
+
+showArgUnnamed :: CoqArg -> String
+showArgUnnamed (arg, t, prop) | isTrivial prop = show t
+showArgUnnamed (arg, t, p) = "{ v : " ++ show t ++ " | " ++ show p ++ " }"
 
 showArgId :: CoqArg -> String
 showArgId (id, _, _) = id
@@ -36,14 +40,30 @@ injectIntoSubset t = addParens $ "# "++ t
 projectFromSubset :: CoqArg -> String
 projectFromSubset (id, _, _) = addParens $ "` "++ id
 
-isSubsetTermCoqArg :: Id -> CoqArg -> Bool
-isSubsetTermCoqArg id (n, typ, ref) | ref /= TT = True
-isSubsetTermCoqArg id (n, RExpr _ _ ref, _)  | ref /= TT = True
-isSubsetTermCoqArg id (n, RExpr _ typ _, r) = isSubsetTermCoqArg id (n, typ, r)
-isSubsetTermCoqArg _ _ = False
+-- replace with constant True function to disable simplifying trivial Subset types
+isTrivial :: Prop -> Bool
+isTrivial = (==) TT
 
-refineApplyGeneric :: [(Id, [CoqArg])] -> (a -> Expr) -> ([(Id, [CoqArg])] -> Id -> a -> Bool) -> Id -> [a] -> Expr
-refineApplyGeneric allSpecs transTm isSubsetTm n args = App n (zipWith (cast allSpecs n) args [1..]) where
+isSubsetTermCoqArg :: CoqArg -> Bool
+isSubsetTermCoqArg (_, _, ref) | not $ isTrivial ref = True
+isSubsetTermCoqArg (n, RExpr _ _ ref, _)  | not $ isTrivial ref = True
+isSubsetTermCoqArg (n, RExpr _ typ _, r) = isSubsetTermCoqArg (n, typ, r)
+isSubsetTermCoqArg _ = False
+
+castInto :: Expr -> Bool -> CoqArg -> Expr
+castInto tm isSubsetTerm expectedTyp = 
+  let 
+    (n, typ, prop) = expectedTyp
+    needSubsetTerm = {- trace ("Calling cast on expr "++ show tm ++ " which " ++ (if isSubsetTerm then "is" else "isn't") ++" of subset type into type "++show expectedTyp ++ ". \n") $ -} not (isTrivial prop)
+  in
+  case (needSubsetTerm, isSubsetTerm) of
+    (True, True) -> tm
+    (True, False) -> Inject (RExpr n typ prop) tm (ProofTerm "I")
+    (False, False) -> tm
+    (False, True) -> Project tm
+
+refineApplyGeneric :: Show a => [(Id, [CoqArg])] -> (a -> Expr) -> ([(Id, [CoqArg])] -> Id -> a -> Bool) -> Id -> [a] -> Expr
+refineApplyGeneric allSpecs transTm isSubsetTm n args = {- trace ("Calling refineApplyGeneric with specs "++ show allSpecs ++ " on: " ++ show (App n (map transTm args))) $ -} App n (zipWith (cast allSpecs n) args [0..]) where
   lookupArgTyp :: [(Id, [CoqArg])] -> Id -> Maybe [CoqArg]
   lookupArgTyp allSpecs id = 
     let
@@ -51,41 +71,37 @@ refineApplyGeneric allSpecs transTm isSubsetTm n args = App n (zipWith (cast all
     in spec
 
   hasSpec allSpecs id i = case lookupArgTyp allSpecs id of 
-    Just argTps -> length argTps > i
+    Just argTps -> 
+      (length argTps >= i + 1) || error ("looked up specification of function " ++ id ++ " has only "++ show (length argTps) ++" arguments but is applied to at least "++ show (i + 1) ++ " arguments. ")
     _ -> False
 
   cast allSpecs id t i | hasSpec allSpecs id i =
     let
       funSpec = fromJust $ lookupArgTyp allSpecs id
       (n, typ, prop) = funSpec!!i
-      needSubsetTerm = prop /= TT
+      needSubsetTerm = not $ isTrivial prop
       tm = transTm t
     in
-    case (needSubsetTerm, isSubsetTm allSpecs id t) of
-      (True, True) -> tm
-      (True, False) -> Inject (RExpr n typ prop) tm (ProofTerm "I")
-      (False, False) -> tm
-      (False, True) -> Project tm
-  cast allSpecs id t i | not (hasSpec allSpecs id i) = if isSubsetTm allSpecs id t then Project $ transTm t else transTm t
+    castInto tm (isSubsetTm allSpecs id t) (funSpec!!i)
+  cast allSpecs id t i | not (hasSpec allSpecs id i) = if isSubsetTm allSpecs id t then Project (transTm t) else transTm t
 
 data Def = Def {defName :: Id, defArgs:: [Id], defBody :: Expr} | SpecDef {sdefNAme :: Id, sdefArgs :: [CoqArg], sdefRet :: CoqArg, sdefBody :: [Tactic]} | RefDef {name :: Id, args:: [CoqArg], ret:: CoqArg, state :: [(Id, [CoqArg])]}
 instance Show Def where
   show (Def name args body) =
     "Fixpoint " ++ name ++ " " ++ unwords args ++ " :=\n"
     ++ "  " ++ show body ++ ".\n"
-  show (SpecDef name args retfts@(resId, ret, post) tacs) = 
-    "Fixpoint " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArg retfts ++ " .\n"++ "Proof.\n"
+  show (SpecDef name args retft tacs) = 
+    "Definition " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArgUnnamed retft ++ ". \n"++ "Proof.\n"
     ++ unwords (map destructSubsetArgIfNeeded args)
     ++ intercalate ". " (map show tacs) ++ ".\n"
-    ++ "Qed.\n"
-  show (RefDef name args (resId, ret, post) specs) = 
+    ++ "Defined.\n"
+  show (RefDef name args retft specs) = 
     let
       unrefName = unrefinedName name
       destructedArgs = map (\(x, typ, ref) -> (x, typ, TT)) args
-      unrefinedApply = refineApplyGeneric specs (\(x, _, _) -> Var x) (const isSubsetTermCoqArg) unrefName
-      retWithRefts refts = " {"++ resId ++ ":" ++ show ret ++ " | " ++ refts ++ " }"
+      unrefinedApply = refineApplyGeneric specs (\(x, _, _) -> Var x) (\_ _ -> isSubsetTermCoqArg) unrefName
       refinedDefinien = "Proof.\n  " ++ unwords (map destructSubsetArgIfNeeded args) ++ "\n" ++ "  exact (exist (" ++ show (unrefinedApply destructedArgs) ++ ") eq_refl). \n" ++ "Defined.\n"
-      refinedDef = "Fixpoint " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ retWithRefts ("v = " ++ show (unrefinedApply args)) ++ " .\n" ++ refinedDefinien
+      refinedDef = "Definition " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArgUnnamed retft ++ " .\n" ++ refinedDefinien
     in refinedDef
 
 
@@ -160,7 +176,8 @@ instance Show Expr where
     where
       showBranch (p, e) = "| " ++ show p ++ " => " ++ show e
   show (Inject (RExpr id typ ref) x p) = addParens $ "inject_into_subset_type " ++ show typ ++ " " ++ show x ++ " " ++ show ref ++ " " ++ show p
-  show (Project expr)   = addParens $ "` " ++ show expr
+  show (Project expr@Var{})   = addParens $ "` " ++ show expr
+  show (Project expr)   = addParens $ "` " ++ addParens (show expr)
   show (ProofTerm prf)  = prf
 
 instance Eq Expr where
@@ -174,7 +191,7 @@ destructSubsetArg :: CoqArg -> Tactic
 destructSubsetArg (name, ty, refts) = Destruct (Var name) [[name, name++"p"]] []
 
 destructSubsetArgIfNeeded :: CoqArg -> String
-destructSubsetArgIfNeeded (n, ty, refts) | show refts == "True" = ""
+destructSubsetArgIfNeeded (n, ty, ref) | isTrivial ref = ""
 destructSubsetArgIfNeeded coqArg = show . destructSubsetArg $ coqArg
 
 data Type = TExpr Expr | TProp Prop | RExpr Id Type Prop | TFun Type Type | Hole
@@ -205,10 +222,6 @@ instance Show Prop where
 data Brel = Eq deriving Eq
 instance Show Brel where show Eq = "="
 
--- Expressions in result of proof should be compared to true.
-proofExpr :: Expr -> Prop
-proofExpr e = Brel Eq e (Var "true")
-
 trivial = "smt_trivial"
 
 ple = "ple"
@@ -228,7 +241,6 @@ data Tactic = Trivial
             | Now Tactic
             | Solve Expr
             | Exact String
-            | ExactSubsetDef Expr
 
 toSolve :: Tactic -> Tactic
 toSolve (Apply e) = Solve e
@@ -252,8 +264,7 @@ instance Show Tactic where
   show (Intros ids) = "intros " ++ unwords ids
   show (Revert ids) = "revert " ++ unwords ids
   show (Now t) = "now " ++ show t
-  show (Exact s) = "exact "++s
-  show (ExactSubsetDef expr) = show . Exact $ addParens ("exist " ++ show expr ++ " eq_refl")
+  show (Exact s) = "exact "++ if head s /= '(' then addParens s else s
 
 showBranches :: [[Tactic]] -> String
 showBranches = intercalate ". " . map showBranch
