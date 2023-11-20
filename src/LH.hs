@@ -314,7 +314,7 @@ transformInductive s app@(Term (LHApp f lhArgs)) =
       indFromApp = checkInductiveCall indVars (zip args [0..])
     return $
       if f == name then
-        fmap (\arg@(pos,argName) -> (arg, Term (LHApp ("IH"++argName) (deleteAt lhArgs pos)))) indFromApp
+        fmap (\arg@(pos,argName) -> (arg, Term $ LHVar ("IH"++argName))) indFromApp
       else
         let modifyArg ix = B.second (setAt lhArgs ix . evaluate) . fromJust $ indFromArgs!!ix
         in  fmap (Term . LHApp f) . modifyArg <$> findIndex isJust indFromArgs
@@ -329,12 +329,8 @@ transformInductive _ _ = return Nothing
 
 transIndDef :: InternalState -> Def -> Arg -> [C.Tactic]
 transIndDef s (Def name args (Case (Term (LHVar ind)) _ [(_,e1), (_,e2)])) (pos, var) =
-    revertArgs ?: [induction [intros ?: transBranch s e1, intros ?: transBranch s e2]]
+    [induction [transBranch s e1, transBranch s e2]]
   where
-    notNullApply :: ([a] -> b) -> [a] -> Maybe b
-    notNullApply f args = toMaybe (notNull args) (f args)
-    [intros, revertArgs] =
-        zipWith notNullApply [C.Intros, C.Revert, C.Revert] [allArgs, nonIndArgs]
     allArgs = nonIndArgs
     nonIndArgs = deleteAt args pos
     induction = C.Induction (args !! pos) var ("IH"++var)

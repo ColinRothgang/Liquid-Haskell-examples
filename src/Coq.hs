@@ -272,7 +272,7 @@ instance Show Tactic where
 
 showBranches :: [[Tactic]] -> String
 showBranches = intercalate ". " . map showBranch
-  where showBranch   = intercalate "; " . map show
+  where showBranch   = intercalate ". " . map show
 
 filterWeird :: String -> String
 filterWeird = filter (not . flip elem "$#")
