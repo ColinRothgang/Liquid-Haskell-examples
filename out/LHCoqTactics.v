@@ -84,20 +84,22 @@ Ltac smt_trivial := simpl; first [ assumption | intuition discriminate | easy ].
 
 Tactic Notation "smt_ple_tac" tactic(tac) :=
   first [ tac | ple; tac | split_ple; tac (* | intros_ple; tac*) ].
-Local Ltac smt_ap th := smt_ple_tac apply th.
-Local Ltac smt_ap_with th arg := smt_ple_tac apply th with arg.
-Local Ltac smt_ap_with2 th arg arg2 := smt_ple_tac apply th with arg arg2.
-Local Ltac smt_ap_with3 th arg arg2 arg3 := smt_ple_tac apply th with arg arg2 arg3.
+Tactic Notation "smt_ple_simpl_tac" tactic(tac) constr(th) :=
+  first [tac| ple; tac | split_ple; tac | simpl in th; simpl; tac | simpl in th; split_ple; tac].
+Local Ltac smt_ap th := smt_ple_simpl_tac (apply th) th.
+Local Ltac smt_ap_with th arg := smt_ple_simpl_tac (apply th with arg) th.
+Local Ltac smt_ap_with2 th arg arg2 := smt_ple_simpl_tac (apply th with arg arg2) th.
+Local Ltac smt_ap_with3 th arg arg2 arg3 := smt_ple_simpl_tac (apply th with arg arg2 arg3) th.
 
-Local Ltac smt_rw th := smt_ple_tac rewrite th.
-Local Ltac smt_rw_with th arg := smt_ple_tac rewrite th with arg.
-Local Ltac smt_rw_with2 th arg arg2 := smt_ple_tac rewrite th with arg arg2.
-Local Ltac smt_rw_with3 th arg arg2 arg3 := smt_ple_tac rewrite th with arg arg2 arg3.
+Local Ltac smt_rw th := smt_ple_simpl_tac (rewrite th) th.
+Local Ltac smt_rw_with th arg := smt_ple_simpl_tac (rewrite th with arg) th.
+Local Ltac smt_rw_with2 th arg arg2 := smt_ple_simpl_tac (rewrite th with arg arg2) th.
+Local Ltac smt_rw_with3 th arg arg2 arg3 := smt_ple_simpl_tac (rewrite th with arg arg2 arg3) th.
 
-Local Ltac smt_rwr th := smt_ple_tac rewrite -> th.
-Local Ltac smt_rwr_with th arg := smt_ple_tac rewrite <- th with arg.
-Local Ltac smt_rwr_with2 th arg arg2 := smt_ple_tac rewrite <- th with arg arg2.
-Local Ltac smt_rwr_with3 th arg arg2 arg3 := smt_ple_tac rewrite <- th with arg arg2 arg3.
+Local Ltac smt_rwr th := smt_ple_simpl_tac (rewrite -> th) th.
+Local Ltac smt_rwr_with th arg := smt_ple_simpl_tac (rewrite <- th with arg) th.
+Local Ltac smt_rwr_with2 th arg arg2 := smt_ple_simpl_tac (rewrite <- th with arg arg2) th.
+Local Ltac smt_rwr_with3 th arg arg2 arg3 := smt_ple_simpl_tac (rewrite <- th with arg arg2 arg3) th.
 
 Tactic Notation "smt_use_rw_rwr_ap" tactic(appl_tac) tactic(rw_tac) tactic(rwr_tac) :=
   first [progress rw_tac | progress rwr_tac | appl_tac].

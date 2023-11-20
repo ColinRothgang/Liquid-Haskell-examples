@@ -203,6 +203,7 @@ transProof s (Term t) | mode s == DefProofMode =
     expectedTyp = let (_, _, spec) = last (defSpecs s) in spec
     castTerm = {-trace ("Casting term "++ show tm ++ " which "++if isSubsetTerm then "is" else "isn't"++ " of subset type into type " ++ C.showArgUnnamed expectedTyp) $-} C.castInto tm isSubsetTerm expectedTyp
   in [C.Exact $ show castTerm]
+transProof s (Term (LHVar "trivial")) = transProof s Unit
 transProof s (Term (LHApp f es)) = C.Apply (refineApply s f (map (transExpr s) es')): concatMap (transProof s) ps
     where
       (es', ps) = B.second catMaybes . unzip $ map (getQMark . Term) es

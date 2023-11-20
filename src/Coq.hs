@@ -152,6 +152,7 @@ data Expr = App Id [Expr]
           | Inject Type Expr Expr
           | Project Expr
           | ProofTerm String
+          | TrivialProof
 
 injectTrivially :: Expr -> Expr
 injectTrivially expr = Inject Hole expr $ ProofTerm "I"
@@ -179,6 +180,7 @@ instance Show Expr where
   show (Project expr@Var{})   = addParens $ "` " ++ show expr
   show (Project expr)   = addParens $ "` " ++ addParens (show expr)
   show (ProofTerm prf)  = prf
+  show TrivialProof = show Trivial
 
 instance Eq Expr where
   (==) x y = show x == show y
@@ -251,7 +253,9 @@ toSolve t = Now t
 instance Show Tactic where
   show Trivial = trivial
   show Ple = ple
+  show (Apply TrivialProof) = show TrivialProof
   show (Apply e) = apply ++ " " ++ showAppArg e
+  show (Solve TrivialProof) = show TrivialProof
   show (Solve e) = solve ++ " " ++ showAppArg e
   -- TODO generalize destruct
   show (Destruct (Var n) binds branches) =
