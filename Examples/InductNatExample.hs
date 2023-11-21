@@ -114,7 +114,6 @@ mult_one_r :: N -> Proof
 mult_one_r Z    = trivial
 mult_one_r (Suc n) = mult_one_r n
 
-{-
 -- | Multiplication with left one
 {-@ mult_one_l :: n: N -> {mult one n == n} @-}
 mult_one_l :: N -> Proof
@@ -136,6 +135,7 @@ add_dist_lmult m (Suc n) o  = mult_suc_r m (add n o)
                             ? add_assoc m (mult m n) (mult m o) 
                             ? mult_suc_r m n
 
+{-
 {-@ mult_assoc :: m: N -> n: N -> o: N -> {mult (mult m n) o == mult m (mult n o)} @-}
 mult_assoc :: N -> N -> N -> Proof
 mult_assoc Z _ _ = trivial
@@ -144,6 +144,7 @@ mult_assoc (Suc m) n o =                    mult (mult (Suc m) n) o
         ? add_dist_rmult n (mult m n) o === (n `mult` o) `add` ((m `mult` n) `mult` o)
         ? mult_assoc m n o              === (n `mult` o) `add` (m `mult` (n `mult` o))
                                         === (Suc m) `mult` (mult n o)           *** QED
+
 -- | Equality of natural numbers
 {-@ reflect eqN @-}
 {-@ eqN :: m:N -> n:N -> {r:Bool | r = (m == n) }@-}

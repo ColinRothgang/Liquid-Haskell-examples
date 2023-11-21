@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE StandaloneDeriving #-}
 module LH where
@@ -418,15 +417,21 @@ instance Dependencies SourceContent where
   dependsOn (Definition _ args ret expr) name = any (`dependsOn` name) args || dependsOn ret name || dependsOn expr name
   dependsOn (Theorem _ args ret expr) name = any (`dependsOn` name) args || dependsOn ret name || dependsOn expr name
 
--- order imports alphabetically, order everything else in dependency order or else in order of given Id list (order in source document), defaulting to LT
+appearsNoLater :: Id -> Id -> [Id] -> Ordering
+appearsNoLater id id2 [] = LT
+appearsNoLater id id2 (x:xs) | x == id = LT
+appearsNoLater id id2 (x:xs) | x == id2 = GT
+appearsNoLater id id2 (x:xs) = appearsNoLater id id2 xs 
+
+-- order imports alphabetically, order everything else in dependency order or else in order of given Id list (e.g. order in source document), defaulting to LT
 orderSourceContent :: [Id] -> SourceContent -> SourceContent -> Ordering
-orderSourceContent _ (Import id) (Import id2) = compare id id2
-orderSourceContent _ (Import _) _  = LT
-orderSourceContent _ srcCont srcCont2 | srcCont == srcCont2 = EQ
+orderSourceContent _ (Import id) (Import id2)                 = compare id id2
+orderSourceContent _ (Import _) _                             = LT
+orderSourceContent _ _ (Import _)                             = GT
+orderSourceContent _ srcCont srcCont2 | srcCont == srcCont2   = EQ
 orderSourceContent _ srcCont srcCont2 | dependsOn srcCont2 (name srcCont) = LT
 orderSourceContent _ srcCont srcCont2 | dependsOn srcCont (name srcCont2) = GT
-orderSourceContent idList srcCont srcCont2 = appearsNoLater (name srcCont) (name srcCont2) idList where
-    appearsNoLater id id2 [] = LT
-    appearsNoLater id id2 (x:xs) | x == id = LT
-    appearsNoLater id id2 (x:xs) | x == id2 = GT
-    appearsNoLater id id2 (x:xs) = appearsNoLater id id2 xs
+orderSourceContent idList (Alias n _) (Alias m _)             = appearsNoLater n m idList
+orderSourceContent _ Alias{} _ = LT
+orderSourceContent _ _ Alias{} = GT
+orderSourceContent idList sC sC2 = appearsNoLater (name sC) (name sC2) idList

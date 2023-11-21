@@ -1,5 +1,4 @@
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE StandaloneDeriving #-}
 
 module LHToCoq (run) where
 
@@ -43,7 +42,7 @@ run args = do
     inputFolderPath <- getCurrentDirectory
     let
       inputFolder = inputFolderPath ++ "/" ++ inputFolderName
-    putStrLn $ "Input file directory: " ++ inputFolder
+    putStrLn $ "\nInput file directory: " ++ inputFolder
     let
       outputPath = "out/"++fileName++".v"
       lhDefs = map CLH.transBind (simplify <$> binds)
@@ -117,8 +116,8 @@ parseSourceContent (inputFolder, filename) defsAndProofs src = do
       imports = map Import importedFiles
       nonImports = map parseDefsAndProofs defsAndProofs
       sourceContents = imports ++ nonImports
-      sortedSourceContents = sortBy (orderSourceContent identifierOrderSource)
-    pure $ imports ++ nonImports
+      sortedSourceContents = sortBy (orderSourceContent identifierOrderSource) sourceContents
+    pure $ sortedSourceContents
     where 
       identifierOrderSource = map (getOccString . tyVarName) (LhLib.giDefVars src)
       srcImports = H.toList $ LhLib.gsAllImps src

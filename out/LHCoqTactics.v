@@ -18,8 +18,8 @@ From Equations Require Import Equations.
 
 Require Import Lia.
 
-Require Init.Peano.
-Require Arith.PeanoNat.
+(** Require Init.Peano.
+Require Arith.PeanoNat.*)
 Require Classes.RelationClasses.
 
 Load LibTactics.

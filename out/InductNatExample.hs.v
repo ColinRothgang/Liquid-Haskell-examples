@@ -1,6 +1,8 @@
 Load LHCoqTactics. 
 Inductive N: Set := Z: N | Suc: (N -> N). 
 Load IntNatExample. 
+Definition one := Suc Z. 
+Definition two := Suc one. 
 Definition add_unrefined (m: N) (n: N): N. 
 Proof.
   induction m as [| m IHm ]. now exact (n). now exact (Suc IHm).
@@ -36,6 +38,11 @@ Proof.
   induction n as [| n IHn ]. now smt_trivial. smt_app IHn.
 Qed.
 
+Theorem mult_one_l (n: N): (` (mult one n)) = n.
+Proof.
+  smt_app (add_zero_r n).
+Qed.
+
 Theorem add_suc_r (m: N) (n: N): Suc (` (add m n)) = (` (add m (Suc n))).
 Proof.
   induction m as [| m IHm ]. now smt_trivial. smt_app IHm.
@@ -56,6 +63,11 @@ Proof.
   induction n as [| n IHn ]. now smt_trivial. smt_app IHn. smt_app (add_assoc m n (` (mult n m))). smt_app (add_comm m n). smt_app (add_assoc n m (` (mult n m))).
 Qed.
 
+Theorem add_dist_rmult (m: N) (n: N) (o: N): (` (mult (` (add m n)) o)) = (` (add (` (mult m o)) (` (mult n o)))).
+Proof.
+  induction m as [| m IHm ]. now smt_trivial. smt_app IHm. smt_app (add_assoc o (` (mult m o)) (` (mult n o))).
+Qed.
+
 Theorem mult_zero_l (n: N): (` (mult Z n)) = Z.
 Proof.
   induction n as [| n IHn ]. now smt_trivial. smt_app IHn.
@@ -71,8 +83,16 @@ Proof.
   induction n as [| n IHn ]. now smt_trivial. smt_app IHn.
 Qed.
 
-Definition one := Suc Z. 
-Definition two := Suc one. 
+Theorem add_dist_lmult (m: N) (n: N) (o: N): (` (mult m (` (add n o)))) = (` (add (` (mult m n)) (` (mult m o)))).
+Proof.
+  induction n as [| n IHn ]. smt_app (mult_zero_r m). smt_app (mult_suc_r m (` (add n o))). smt_app IHn. smt_app (add_assoc m (` (mult m n)) (` (mult m o))). smt_app (mult_suc_r m n).
+Qed.
+
+Theorem one_plus_one : (` (add one one)) = two.
+Proof.
+  now smt_trivial.
+Qed.
+
 Theorem mult_one_r (n: N): (` (mult n one)) = n.
 Proof.
   induction n as [| n IHn ]. now smt_trivial. smt_app IHn.
