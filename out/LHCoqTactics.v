@@ -22,6 +22,8 @@ Require Init.Peano.
 Require Arith.PeanoNat.
 Require Classes.RelationClasses.
 
+Load LibTactics.
+
 
 (** The first two tactics are taken from https://gitlab.mpi-sws.org/iris/stdpp/-/blob/df33944852793fd7a93368b6b0251e9f29a3c4dd/stdpp/tactics.v#L45-78 (they are BSD licensed).*)
 
@@ -82,21 +84,41 @@ Local Ltac intros_ple :=
 
 Ltac smt_trivial := simpl; first [ assumption | intuition discriminate | easy ].
 
+
 Tactic Notation "smt_ple_tac" tactic(tac) :=
   first [ tac | ple; tac | split_ple; tac (* | intros_ple; tac*) ].
 Tactic Notation "smt_ple_simpl_tac" tactic(tac) constr(th) :=
   first [tac| ple; tac | split_ple; tac | simpl in th; simpl; tac | simpl in th; split_ple; tac].
-Local Ltac smt_ap th := smt_ple_simpl_tac (apply th) th.
+
+Local Tactic Notation "rewrites" constr(H) :=
+  first [smt_ple_tac (rewrite H) | smt_ple_tac (rewrite <- H)].
+  
+Local Tactic Notation "simpl_rewrite" constr(Happ) :=
+  let claim := type of Happ in
+  let L' := fresh "L" in
+  assert (L': claim); [apply Happ|];
+  try first [rewrites L' | simpl in L'; rewrites L'].
+
+Local Tactic Notation "simpl_apply" constr(Happ) :=
+  let claim := type of Happ in
+  let L' := fresh "L" in
+  assert (L': claim); [apply Happ|];
+  try first [apply L' | simpl in L'; smt_ple_tac (apply L')].
+
+(*  match Happ with
+  | [ |- ?claim ] =>
+      let L' := fresh "L" in
+      assert (L': claim); [smt_app Happ|];
+      try first [smt_ple_simpl_tac (rewrite L') | smt_ple_simpl_tac (rewrite <- L')]
+  end.*)
 Local Ltac smt_ap_with th arg := smt_ple_simpl_tac (apply th with arg) th.
 Local Ltac smt_ap_with2 th arg arg2 := smt_ple_simpl_tac (apply th with arg arg2) th.
 Local Ltac smt_ap_with3 th arg arg2 arg3 := smt_ple_simpl_tac (apply th with arg arg2 arg3) th.
 
-Local Ltac smt_rw th := smt_ple_simpl_tac (rewrite th) th.
 Local Ltac smt_rw_with th arg := smt_ple_simpl_tac (rewrite th with arg) th.
 Local Ltac smt_rw_with2 th arg arg2 := smt_ple_simpl_tac (rewrite th with arg arg2) th.
 Local Ltac smt_rw_with3 th arg arg2 arg3 := smt_ple_simpl_tac (rewrite th with arg arg2 arg3) th.
 
-Local Ltac smt_rwr th := smt_ple_simpl_tac (rewrite -> th) th.
 Local Ltac smt_rwr_with th arg := smt_ple_simpl_tac (rewrite <- th with arg) th.
 Local Ltac smt_rwr_with2 th arg arg2 := smt_ple_simpl_tac (rewrite <- th with arg arg2) th.
 Local Ltac smt_rwr_with3 th arg arg2 arg3 := smt_ple_simpl_tac (rewrite <- th with arg arg2 arg3) th.
@@ -104,7 +126,7 @@ Local Ltac smt_rwr_with3 th arg arg2 arg3 := smt_ple_simpl_tac (rewrite <- th wi
 Tactic Notation "smt_use_rw_rwr_ap" tactic(appl_tac) tactic(rw_tac) tactic(rwr_tac) :=
   first [progress rw_tac | progress rwr_tac | appl_tac].
 
-Ltac smt_use th := smt_use_rw_rwr_ap (smt_ap th) (smt_rw th) (smt_rwr th).
+Ltac smt_use th := first [progress simpl_rewrite th | simpl_apply th].
 Ltac smt_use_with th arg := smt_use_rw_rwr_ap (smt_ap_with th arg) (smt_rw_with th arg) (smt_rwr_with th arg).
 Ltac smt_use_with2 th arg arg2 := smt_use_rw_rwr_ap (smt_ap_with2 th arg arg2) (smt_rw_with2 th arg arg2) (smt_rwr_with2 th arg arg2).
 Ltac smt_use_with3 th arg arg2 arg3:= smt_use_rw_rwr_ap (smt_ap_with3 th arg arg2 arg3) (smt_rw_with3 th arg arg2 arg3) (smt_rwr_with3 th arg arg2 arg3).
