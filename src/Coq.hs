@@ -45,7 +45,7 @@ injectIntoSubset t = addParens $ "# "++ t
 projectFromSubset :: CoqArg -> String
 projectFromSubset (id, _, _) = addParens $ "` "++ id
 
--- replace with constant True function to disable simplifying trivial Subset types
+-- replace definien with const False to disable simplifying trivial Subset types
 isTrivial :: Prop -> Bool
 isTrivial = (==) TT
 
@@ -186,7 +186,7 @@ instance Show Expr where
       ++ unwords (map showBranch branches) ++ " end"
     where
       showBranch (p, e) = "| " ++ show p ++ " => " ++ show e
-  show (Inject (RExpr id typ ref) x p) = addParens $ "inject_into_subset_type " ++ show typ ++ " " ++ show x ++ " " ++ show ref ++ " " ++ show p
+  show (Inject (RExpr id typ ref) x p) =  injectIntoSubset $ show x -- addParens $ "inject_into_subset_type " ++ show typ ++ " " ++ show x ++ " " ++ show ref ++ " " ++ show p
   show (Project expr@Var{})   = addParens $ "` " ++ show expr
   show (Project expr)   = addParens $ "` " ++ addParens (show expr)
   show (ProofTerm prf)  = prf
@@ -210,6 +210,7 @@ data Type = TExpr Expr | TProp Prop | RExpr Id Type Prop | TFun Type Type | Hole
 instance Show Type where
   show (TExpr e) = show e
   show (TProp p) = show p
+  show (RExpr id typ refts) | isTrivial refts = show typ
   show (RExpr id typ refts) = "{"++ id ++ ": " ++ show typ ++ "| " ++ show refts ++"}"
   show (TFun dom codom) = addParens $ show dom ++ " -> " ++ show codom
   show Hole = "_"

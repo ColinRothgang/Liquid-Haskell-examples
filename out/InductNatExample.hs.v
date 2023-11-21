@@ -88,11 +88,6 @@ Proof.
   induction n as [| n IHn ]. smt_app (mult_zero_r m). smt_app (mult_suc_r m (` (add n o))). smt_app IHn. smt_app (add_assoc m (` (mult m n)) (` (mult m o))). smt_app (mult_suc_r m n).
 Qed.
 
-Theorem one_plus_one : (` (add one one)) = two.
-Proof.
-  now smt_trivial.
-Qed.
-
 Theorem mult_one_r (n: N): (` (mult n one)) = n.
 Proof.
   induction n as [| n IHn ]. now smt_trivial. smt_app IHn.

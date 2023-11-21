@@ -177,10 +177,10 @@ transType :: InternalState -> Type -> C.Expr
 transType _ (TVar tv) = C.Var tv
 transType s (TDat con tys) = C.App con $ map (transType s) tys
 
-transFuncType :: InternalState -> [Type] -> C.Type
-transFuncType s argTps = foldr C.TFun dom codom where
-    args = map (C.TExpr . transType s) argTps
-    dom:codom = args
+transFuncType :: InternalState -> [C.CoqArg] -> C.Type -> C.Type
+transFuncType s argTps ret = foldl C.TFun dom codom where
+    args = map (\(n, typ, ref) -> C.RExpr n typ ref) argTps
+    dom:codom = args ++ [ret]
 
 transPat :: Pat -> C.Pat
 transPat (Pat con args) = C.Pat con args

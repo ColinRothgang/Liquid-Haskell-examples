@@ -163,12 +163,15 @@ translateToCoq srcConts =
     translateBranch :: Id -> InternalState -> (Id, [Type]) -> StateResult (Id, C.Type)
     translateBranch n s (bn, argTps) = 
       do
-        registerDefSpecs bn coqArgs (bn++"ret", C.TExpr (transType s $ TVar n), C.TT)
-        pure (bn, transFuncType s args)
+        registerDefSpecs bn coqArgs (bn, funcTyp, C.TT)
+
+        pure (bn, funcTyp)
         where
           argsT = map (C.TExpr . transType s) argTps
           coqArgs = zipWith (\i x -> ("x"++show i, x, C.TT)) [1..] argsT
-          args = argTps ++ [TVar n]
+          ret = C.TExpr $ C.Var n
+          funcTyp = transFuncType s coqArgs ret
+          
   translate (Result (s,Alias n expr)) = pure [C.ConstantDeclaration $ C.Const n (transExpr s expr)]
   translate (Result (s, Definition name args retrf@(LHArg resId ret post) body)) = 
     let 
