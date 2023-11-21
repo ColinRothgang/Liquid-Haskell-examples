@@ -3,6 +3,7 @@ import Util
 import Prelude
 
 import Data.List (find)
+import Data.Char (isSpace)
 
 import Debug.Trace
 
@@ -14,10 +15,14 @@ data Theorem = Theorem {cpName :: Id, cpArgs :: [CoqArg], cpType :: Prop, cpbody
 instance Show Theorem where
   show (Theorem name args ty bod) =
     "Theorem " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ show ty ++ ".\n"
-    ++ "Proof.\n"
-    ++ unwords (map destructSubsetArgIfNeeded args)
+    ++ "Proof.\n  "
+    ++ destructArgs args
     ++ intercalate ". " (map show bod) ++ ".\n"
     ++ "Qed.\n"
+    where 
+      destructArgs args = 
+        let destructs = unwords (map destructSubsetArgIfNeeded args) in
+        if all isSpace destructs then "" else destructs ++ "\n  "
 
 -- data Proof = IndProof {bod :: ProofBod  , proofIndArg :: (Id,Int)} | NIndProof {bod :: PrBod}
 showArg :: CoqArg -> String
@@ -91,16 +96,21 @@ instance Show Def where
     "Fixpoint " ++ name ++ " " ++ unwords args ++ " :=\n"
     ++ "  " ++ show body ++ ".\n"
   show (SpecDef name args retft tacs) = 
-    "Definition " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArgUnnamed retft ++ ". \n"++ "Proof.\n"
-    ++ unwords (map destructSubsetArgIfNeeded args)
+    "Definition " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArgUnnamed retft ++ ". \n"++ "Proof.\n  "
+    ++ destructArgs args
     ++ intercalate ". " (map show tacs) ++ ".\n"
     ++ "Defined.\n"
+    where 
+      destructArgs args = 
+        let destructs = unwords (map destructSubsetArgIfNeeded args) in
+        if all isSpace destructs then "" else destructs ++ "\n  "
   show (RefDef name args retft specs) = 
     let
       unrefName = unrefinedName name
       destructedArgs = map (\(x, typ, ref) -> (x, typ, TT)) args
       unrefinedApply = refineApplyGeneric specs (\(x, _, _) -> Var x) (\_ _ -> isSubsetTermCoqArg) unrefName
-      refinedDefinien = "Proof.\n  " ++ unwords (map destructSubsetArgIfNeeded args) ++ "\n" ++ "  exact (exist (" ++ show (unrefinedApply destructedArgs) ++ ") eq_refl). \n" ++ "Defined.\n"
+      destructs = unwords (map destructSubsetArgIfNeeded args)
+      refinedDefinien = "Proof.\n  " ++ (if all isSpace destructs then "" else destructs ++ "\n  ") ++ "exact (exist (" ++ show (unrefinedApply destructedArgs) ++ ") eq_refl). \n" ++ "Defined.\n"
       refinedDef = "Definition " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArgUnnamed retft ++ " .\n" ++ refinedDefinien
     in refinedDef
 
