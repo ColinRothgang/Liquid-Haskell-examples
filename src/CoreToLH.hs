@@ -23,12 +23,16 @@ trans (Var id)  | name == "()" = LH.Unit
                 | otherwise = LH.Term $ LH.LHVar name
                 where name = showStripped id
 trans app@App{}
+  | name == "***" && qed == LH.LHVar "QED" && typ == typ2 = transEqns firstTerm lastTerm
   | name == "?" = LH.QMark first second
   | name == "patError" = LH.Unit -- patError parts replaced by trivial.
   | name == "()" = LH.Unit
   | otherwise   = LH.Term $ LH.LHApp name (map LH.evaluate args)
   where (name, args)     = flattenApp app
         (_:_:first:second:_) = args
+        [typ, eqChain, qed] = map LH.evaluate args
+        (LH.LHApp "===" (typ2:firstTerm:[lastTerm])) = eqChain
+        
 trans l@Lam{}            = error "lambda expression not supported."
 trans (Case e b t alts)  = LH.Case (trans  e) (showStripped b) (map altToClause alts)
 trans c@Cast{}           = error "cast expression not supported."
@@ -67,3 +71,23 @@ flattenApp :: Show b => Expr b -> (Id, [LH.Expr])
 flattenApp (App f x) = (++ [trans x]) `B.second` flattenApp f
 flattenApp (Var name) = (showStripped name, [])
 flattenApp t          = error "cannot flatten expr."
+
+flattenQmarks :: LH.Expr -> ([LH.LHExpr], LH.Expr)
+flattenQmarks (LH.QMark tm hint) = 
+  let (hints, expr) = flattenQmarks tm
+  in (LH.evaluate hint:hints, tm)
+flattenQmarks expr@LH.Term{} = ([], expr)
+
+
+transEqns :: LH.LHExpr -> LH.LHExpr -> LH.Expr
+transEqns (LH.LHApp "===" (_:nextTerm:[penultimateTerm])) lastTerm =
+  let fstTerm = transEqns nextTerm penultimateTerm 
+  in LH.Eqn fstTerm [] lastTerm
+transEqns (LH.Evaluate qm@(LH.QMark (LH.Term (LH.LHApp "===" _)) _)) lastTerm =
+  let 
+    (hints, LH.Term (LH.LHApp "===" (_:nextTerm:[penultimateTerm]))) = flattenQmarks qm
+    fstTerm = transEqns nextTerm penultimateTerm 
+  in LH.Eqn fstTerm hints lastTerm
+transEqns (LH.Evaluate qm@(LH.QMark _ _)) lastTerm = 
+  let (hints, firstTerm) = flattenQmarks qm in LH.Eqn firstTerm hints lastTerm
+transEqns firstTerm lastTerm = LH.Eqn (LH.Term firstTerm) [] lastTerm

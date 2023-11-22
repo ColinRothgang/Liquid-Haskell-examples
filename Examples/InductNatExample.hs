@@ -135,7 +135,6 @@ add_dist_lmult m (Suc n) o  = mult_suc_r m (add n o)
                             ? add_assoc m (mult m n) (mult m o) 
                             ? mult_suc_r m n
 
-{-
 {-@ mult_assoc :: m: N -> n: N -> o: N -> {mult (mult m n) o == mult m (mult n o)} @-}
 mult_assoc :: N -> N -> N -> Proof
 mult_assoc Z _ _ = trivial
@@ -145,6 +144,7 @@ mult_assoc (Suc m) n o =                    mult (mult (Suc m) n) o
         ? mult_assoc m n o              === (n `mult` o) `add` (m `mult` (n `mult` o))
                                         === (Suc m) `mult` (mult n o)           *** QED
 
+{-
 -- | Equality of natural numbers
 {-@ reflect eqN @-}
 {-@ eqN :: m:N -> n:N -> {r:Bool | r = (m == n) }@-}

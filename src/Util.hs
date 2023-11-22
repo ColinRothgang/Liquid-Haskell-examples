@@ -73,7 +73,7 @@ notNull :: [a] -> Bool
 notNull = not . null
 
 mapSnd :: (a -> b) -> [(c, a)] -> [(c,b)]
-mapSnd f xys = map (\(x,y) -> (x, f y)) xys  
+mapSnd f = map $ B.second f
 
 mapMSnd :: Monad m => (a -> m b) -> [(c, a)] -> m [(c,b)]
 mapMSnd _ [] = return [] 

@@ -59,6 +59,7 @@ run args = do
     -- mapM_ (putStrLn . (\x -> showSDocUnsafe $ ppr x)) binds
 
     -- mapM_ print lhDefs
+    -- mapM_ print parsedSource
 
     putStrLn $ "\nThe translation to Coq yields: \n" ++ output
     putStrLn $ "Writing output to file at "++outputPath
@@ -117,7 +118,7 @@ parseSourceContent (inputFolder, filename) defsAndProofs src = do
       nonImports = map parseDefsAndProofs defsAndProofs
       sourceContents = imports ++ nonImports
       sortedSourceContents = sortBy (orderSourceContent identifierOrderSource) sourceContents
-    pure $ sortedSourceContents
+    pure sortedSourceContents
     where 
       identifierOrderSource = map (getOccString . tyVarName) (LhLib.giDefVars src)
       srcImports = H.toList $ LhLib.gsAllImps src

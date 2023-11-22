@@ -1,5 +1,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TupleSections #-}
+
 module LH where
 
 import Prelude
@@ -7,7 +9,7 @@ import qualified Coq as C
 
 import qualified Data.Map as M
 import Control.Monad.Reader
-import Data.List(findIndex,find)
+import Data.List(findIndex,find, stripPrefix)
 import Util
 import qualified Data.Bifunctor as B
 import Debug.Trace
@@ -16,6 +18,7 @@ data Proof = Proof Def Signature deriving Show
 data Def = Def {defName :: Id, defArgs:: [Id], defBody :: Expr} deriving Show
 data Expr = Term LHExpr
           | QMark Expr Expr
+          | Eqn Expr [LHExpr] LHExpr
           | Unit
           | Case Expr Id [(Pat, Expr)]
           | Let Id Expr Expr
@@ -50,6 +53,10 @@ instance Eq LHExpr where
 evaluate :: Expr -> LHExpr
 evaluate (Term t) = t
 evaluate expr = Evaluate expr
+
+unevaluate :: LHExpr -> Expr
+unevaluate (Evaluate expr) = expr
+unevaluate tm = Term tm 
 
 data Brel = Eq deriving Show
 
@@ -117,6 +124,7 @@ renamePat (Pat patCon patArgs) = Pat <$> rename patCon <*> mapM rename patArgs
 
 renameExpr :: Expr -> Reader Renames Expr
 renameExpr (Term lhExpr)        = Term  <$> renameReft lhExpr
+renameExpr (Eqn expr hintO tm)  = Eqn   <$> renameExpr expr <*> mapM renameReft hintO <*> renameReft tm
 renameExpr (QMark expr expr2)   = QMark <$> renameExpr expr <*> renameExpr expr2
 renameExpr Unit                 = pure Unit
 renameExpr (Case expr id branches)  = Case <$> renameExpr expr <*> rename id <*> mapM (\(pat, expr) -> (,) <$> renamePat pat <*> renameExpr expr) branches
@@ -210,6 +218,7 @@ transProof s (Term (LHApp f es)) = C.Apply (refineApply s f (map (transExpr s) e
       getQMark (QMark e1 e2) = (e1, Just e2)
       getQMark e             = (e,Nothing)
 transProof s (Term t) = [C.Apply (transLHExpr s t)]
+transProof s (Eqn expr hints tm) = translateEqn s expr hints tm
 
 transProof s (QMark e1 e2) = concatMap (transProof s) [e1,e2]
 transProof _ Unit = [C.Trivial]
@@ -218,6 +227,19 @@ transProof s (Case e _ bs) =
     [C.Destruct (transExpr s e) (map patArgs pats) (map (transProof s) es)]
   where
     (pats, es) = unzip bs
+
+flattenEqns :: Expr -> [LHExpr] -> LHExpr -> [(LHExpr, LHExpr, [LHExpr])]
+flattenEqns (Term tm) hints lstTm = [(tm, lstTm, hints)]
+flattenEqns (Eqn expr fstHints penultimateTm) hints lstTm =
+  let eqns = flattenEqns expr fstHints penultimateTm
+  in eqns++[(penultimateTm, lstTm, hints)]
+
+
+translateEqn :: InternalState -> Expr -> [LHExpr] -> LHExpr -> [C.Tactic]
+translateEqn s expr hints tm = 
+  let 
+    eqns = flattenEqns expr hints tm
+  in map (\(x, y, hints) -> C.Assert "lem" (transEq s x y) (concatMap (transProof s . Term) hints)) eqns
 
 
 transBrel :: Brel -> C.Brel
@@ -249,6 +271,9 @@ transProp s (LHApp f es)          = C.PExpr $ refineApply s f $ map (transLHExpr
 transProp s (LHVar x)             = C.PExpr $ C.Var x
 transProp s (LHImpl ante concl)   = C.Impl (transProp s ante) $ transProp s concl
 transProp s LHTrue                = C.TT
+
+
+-- Top level translation
 
 data Environment =  Env
   { envName :: Id
@@ -286,7 +311,7 @@ transformInductive s (Let x e1 e2) = do
     return $ case ind1 of
                 Nothing       -> fmap (Let x e1) <$> ind2
                 Just (ind, e) -> Just (ind, Let x e e2)
-transformInductive s (Case (Term (LHVar matchId)) ident branches) = {-trace ("Calling transformInductive on Case "++matchId ++ " of "++ident++" with branches: "++show branches) $-} do
+transformInductive s (Case (Term (LHVar matchId)) ident branches) = {-trace ("Calling transformInductive on Case "++matchId ++ " of "++ident++" with branches: \n  "++intercalate ",\n  " (map show branches)) $-} do
     Env{envName=name, envArgs=args} <- ask
     let n = fromMaybe (error $ "Non-existent id: "++matchId++" in "++intercalate "|" (map (\(id, n) -> id ++ " -> "++ show n) $ M.toList args)) (M.lookup matchId args)
     mInds <- forM branches $ \(Pat con args, e) ->
@@ -305,8 +330,8 @@ transformInductive s (Case (Term (LHVar matchId)) ident branches) = {-trace ("Ca
     replaceExprWith :: Expr -> (Pat, Expr) -> (Pat,Expr)
     replaceExprWith e' (pat,e) = (pat,e')
 transformInductive s app@(Term (LHApp f lhArgs)) = 
-  let args = map Term lhArgs in
-  do
+  let args = map unevaluate lhArgs in
+  {-trace ("Checking if "++show app++" is recursive call.\n") $-} do
     Env{envName=name, envIndVars=indVars} <- ask
     indFromArgs <- mapM (transformInductive s) args
     let 
@@ -324,6 +349,31 @@ transformInductive s (QMark e1 e2) = do
       Nothing -> do
         mInd2 <- transformInductive s e2
         return $ (\ (arg, e2') -> Just (arg, QMark e1 e2')) =<< mInd2
+transformInductive s eqn@(Eqn expr lstHints lstTm) = 
+  let 
+    hints = map unevaluate lstHints 
+    lstExpr = unevaluate lstTm in
+  {- trace ("calling transformInductive on equation:\n  "++intercalate "\n  " (map show (flattenEqns expr lstHints lstTm))) $-} do
+    mIndInit <- transformInductive s expr
+    case mIndInit of
+      Just (arg, e') -> return $ Just (arg, Eqn e' lstHints lstTm)
+      Nothing -> do
+        mIndLst <- transformInductive s lstExpr
+        case mIndLst of
+          Just (arg, e') -> return $ Just (arg, Eqn expr lstHints (evaluate e'))
+          Nothing -> do
+            Env{envName=name, envIndVars=indVars} <- ask
+            indFromArgs <- mapM (transformInductive s) hints
+            let 
+              isIndCall var = not (null $ M.lookup (fromJust $ stripPrefix "IH" var) indVars)
+              indIdx = findIndex (\x -> case x of (Just (_, Term (LHVar arg))) -> isIndCall arg; _ -> False) indFromArgs
+              indFromHints = (=<<) (\x -> fmap fst $ indFromArgs!!x) indIdx
+
+              {-indexedHints = trace ("indFromArgs: "++show indFromArgs++", indCallIdx: "++show indIdx++", indFromHintsSimpl: "++show indFromHintsSimpl) $ zip hints [0..]
+              indFromHints = trace ("indexedHints: "++show indexedHints++", indVars: "++show indVars) $ checkInductiveCall indVars indexedHints -}
+              transformedHints = zipWith (\x y -> case x of Just (_, x) -> x; Nothing -> y) indFromArgs hints
+              transformedEqn = trace("transformedHints: "++show transformedHints) $ Eqn expr (map evaluate transformedHints) lstTm 
+            return $ fmap (,transformedEqn) indFromHints
 transformInductive _ _ = return Nothing
 
 transIndDef :: InternalState -> Def -> Arg -> [C.Tactic]
@@ -337,6 +387,9 @@ transIndDef _ def _ = error $ "unhandled proof case of " ++ show def
 
 transBranch :: InternalState -> Expr -> [C.Tactic]
 transBranch s = updateLast C.toSolve . transProof s
+
+
+-- intermediate representation of LH source
 
 class Dependencies a where
   dependsOn:: a -> Id -> Bool
@@ -357,11 +410,12 @@ instance Dependencies LHExpr where
   dependsOn LHTrue _                  = False
 
 instance Dependencies Expr where
-  dependsOn (Term t) name = t `dependsOn` name
-  dependsOn (QMark expr expr2) name = dependsOn expr name || dependsOn expr2 name
-  dependsOn Unit name = False
-  dependsOn (Case expr pat branches) name = dependsOn expr name || any (\(Pat patCon patArgs, expr) -> dependsOn expr name || patCon == name || elem name patArgs) branches
-  dependsOn (Let id expr expr2) name = dependsOn expr name || dependsOn expr2 name
+  dependsOn (Term t) name                   = t `dependsOn` name
+  dependsOn (Eqn expr hintO tm) name        = expr `dependsOn` name || any (`dependsOn` name) hintO || tm `dependsOn` name
+  dependsOn (QMark expr expr2) name         = dependsOn expr name || dependsOn expr2 name
+  dependsOn Unit name                       = False
+  dependsOn (Case expr pat branches) name   = dependsOn expr name || any (\(Pat patCon patArgs, expr) -> dependsOn expr name || patCon == name || elem name patArgs) branches
+  dependsOn (Let id expr expr2) name        = dependsOn expr name || dependsOn expr2 name
 
 instance Dependencies LHArg where
   dependsOn (LHArg id t reft) name = dependsOn t name || dependsOn reft name

@@ -68,6 +68,15 @@ Proof.
   induction m as [| m IHm ]. now smt_trivial. smt_app IHm. smt_app (add_assoc o (` (mult m o)) (` (mult n o))).
 Qed.
 
+Theorem mult_assoc (m: N) (n: N) (o: N): (` (mult (` (mult m n)) o)) = (` (mult m (` (mult n o)))).
+Proof.
+  induction m as [| m IHm ]. now smt_trivial. 
+  assertFresh ((` (mult (` (mult (Suc m) n)) o)) = (` (mult (` (add n (` (mult m n)))) o))) as lem using smt_trivial. 
+  assertFresh ((` (mult (` (add n (` (mult m n)))) o)) = (` (add (` (mult n o)) (` (mult (` (mult m n)) o))))) as lem using (smt_app (add_dist_rmult n (` (mult m n)) o)). 
+  assertFresh ((` (add (` (mult n o)) (` (mult (` (mult m n)) o)))) = (` (add (` (mult n o)) (` (mult m (` (mult n o))))))) as lem using (smt_app IHm). now 
+  assertFresh ((` (add (` (mult n o)) (` (mult m (` (mult n o)))))) = (` (mult (Suc m) (` (mult n o))))) as lem using smt_trivial.
+Qed.
+
 Theorem mult_zero_l (n: N): (` (mult Z n)) = Z.
 Proof.
   induction n as [| n IHn ]. now smt_trivial. smt_app IHn.

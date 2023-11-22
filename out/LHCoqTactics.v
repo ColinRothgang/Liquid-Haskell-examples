@@ -105,12 +105,6 @@ Local Tactic Notation "simpl_apply" constr(Happ) :=
   assert (L': claim); [apply Happ|];
   try first [apply L' | simpl in L'; smt_ple_tac (apply L')].
 
-(*  match Happ with
-  | [ |- ?claim ] =>
-      let L' := fresh "L" in
-      assert (L': claim); [smt_app Happ|];
-      try first [smt_ple_simpl_tac (rewrite L') | smt_ple_simpl_tac (rewrite <- L')]
-  end.*)
 Local Ltac smt_ap_with th arg := smt_ple_simpl_tac (apply th with arg) th.
 Local Ltac smt_ap_with2 th arg arg2 := smt_ple_simpl_tac (apply th with arg arg2) th.
 Local Ltac smt_ap_with3 th arg arg2 arg3 := smt_ple_simpl_tac (apply th with arg arg2 arg3) th.
@@ -130,6 +124,11 @@ Ltac smt_use th := first [progress simpl_rewrite th | simpl_apply th].
 Ltac smt_use_with th arg := smt_use_rw_rwr_ap (smt_ap_with th arg) (smt_rw_with th arg) (smt_rwr_with th arg).
 Ltac smt_use_with2 th arg arg2 := smt_use_rw_rwr_ap (smt_ap_with2 th arg arg2) (smt_rw_with2 th arg arg2) (smt_rwr_with2 th arg arg2).
 Ltac smt_use_with3 th arg arg2 arg3:= smt_use_rw_rwr_ap (smt_ap_with3 th arg arg2 arg3) (smt_rw_with3 th arg arg2 arg3) (smt_rwr_with3 th arg arg2 arg3).
+
+Tactic Notation "assertFresh" constr(claim) "as" ident(lem) "using" tactic(tac) :=
+  let H := fresh lem in
+  assert (H: claim); [try tac|];
+  try smt_use H.
 
 Ltac smt_app th :=
   (** first [ rewrite th | ple; rewrite th | split_ple; rewrite th | rewrite <- th | ple; rewrite <- th | split_ple; rewrite <- th| apply th | ple; apply th | split_ple; apply th]; try smt_trivial.*)

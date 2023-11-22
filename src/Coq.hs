@@ -248,6 +248,7 @@ data Tactic = Trivial
             | Apply Expr
             | Destruct {destrExpr :: Expr, destrBinds :: [[Id]], destrBranches :: [[Tactic]]}
             | Induction {indArg :: Id, indVar :: Id, indHyp :: Id, indBranches :: [[Tactic]]}
+            | Assert {hypName:: Id, claim:: Prop, prf:: [Tactic]}
             | LetTac Id Tactic Tactic
             | Intros [Id]
             | Revert [Id]
@@ -275,6 +276,8 @@ instance Show Tactic where
   show (Induction arg var hyp branches) =
       "induction " ++ arg ++ " as [| " ++ unwords [var,hyp] ++ " ]. "
       ++ showBranches branches
+  show (Assert hypName claim prf) = "\n  assertFresh " ++ addParens (show claim) ++ " as "++ hypName ++ " using "  ++ proof where
+    proof = if not (null prf) then addParens (intercalate "; " (map show prf)) else show Trivial
   show (LetTac id t1 t2) = "let " ++ filterWeird id ++ " := " ++ addParens (show t1) ++ " in " ++ show t2
   show (Intros ids) = "intros " ++ unwords ids
   show (Revert ids) = "revert " ++ unwords ids
