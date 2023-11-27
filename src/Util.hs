@@ -17,7 +17,18 @@ import qualified Data.Bifunctor as B
 type Id = String
 
 addParens :: String -> String
-addParens = (++ ")") . ("(" ++)
+-- addParens s@(c:cs) | c == '(' && last s == ')' = s
+addParens s 
+  | bracketed && correctlyBracketed 0 sStripped = s
+  | otherwise = "(" ++s ++ ")" where
+  bracketed = safeHead s == Just '(' && last s == ')'
+  sStripped = if bracketed then (init . tail) s else s
+  correctlyBracketed n ('(':s) = correctlyBracketed (n+1) s
+  correctlyBracketed n (')':_) | n <= 0 = False
+  correctlyBracketed n (')':s) = correctlyBracketed (n-1) s
+  correctlyBracketed n (_:s) = correctlyBracketed n s
+  correctlyBracketed n [] = True
+
 
 -- Get rid of module names.
 showStripped :: Show a => a -> String

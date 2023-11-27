@@ -22,6 +22,11 @@ Require Import Lia.
 Require Arith.PeanoNat.*)
 Require Classes.RelationClasses.
 
+Require Export ZArith Int.
+Open Scope Z_scope.
+Open Scope Int_scope.
+Require Export Floats.
+
 Load LibTactics.
 
 
@@ -174,3 +179,7 @@ Notation "x `= y" := (@eq _ (`x) (`y)) (at level 70).
 Definition inject_into_subset_type (A:Type) (x:A) (H:Prop) (p:H): {x:A | H} := (exist x p).
 Definition inject_into_trivial_subset_type (A:Type) (x:A) : {v:A | True} := (exist x I).
 Notation "# x" := (exist x I) (at level 60).
+
+
+Definition CoqInt := Z.
+Definition CoqFloat := float.

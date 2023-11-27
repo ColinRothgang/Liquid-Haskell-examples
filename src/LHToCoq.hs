@@ -25,7 +25,7 @@ import LH
 import qualified Coq as C
 import qualified SpecToLH as SLH
 import           Simplify (simplify)
-import Preamble (lhPreamble)
+import Preamble (lhPreamble, preamble)
 import Util
 
 import Debug.Trace
@@ -52,11 +52,14 @@ run args = do
     let
       lhSource = lhPreamble ++ parsedSource
       LH.Result (state, translatedSourceContent) = translateToCoq lhSource
-      translatedFile = map show translatedSourceContent
+      translatedFile = preamble ++ map show translatedSourceContent
       output = intercalate "\n" translatedFile
      
-    -- mapM_ (putStrLn . show) dataDecls --(putStrLn . (\x -> showSDocUnsafe $ ppr x)) dataDecls
-    -- mapM_ (putStrLn . (\x -> showSDocUnsafe $ ppr x)) binds
+    -- mapM_ (putStrLn . show) dataDecls --(putStrLn . (showSDocUnsafe . ppr)) dataDecls
+    -- mapM_ (putStrLn . (showSDocUnsafe . ppr)) binds
+    -- putStrLn ((showSDocUnsafe . ppr) $ head binds)
+    -- mapM_ (putStrLn . (\x -> show x)) defsAndProofs
+
 
     -- mapM_ print lhDefs
     -- mapM_ print parsedSource

@@ -26,24 +26,31 @@ data Expr = Term LHExpr
 instance Eq Expr where 
   (==) expr expr2 = show expr == show expr2
 
-data Type = TVar Id | TDat Id [Type] deriving Show
+data Type = TVar Id | TDat Id [Type] | Buildin BuildInTps deriving Show
 
 isProof :: Signature -> Bool
 isProof = (== "()") . typeName . lhArgType . sigRes
   where
     typeName :: Type -> String
     typeName (TVar n) = n
+    typeName (Buildin b) = show b
     typeName (TDat n _) = n
 
 data Pat = Pat {patCon :: Id, patArgs :: [Id]} deriving Show
 
 data LHExpr = And [LHExpr]
+            | Or [LHExpr]
             | LHImpl LHExpr LHExpr
             | LHNeg LHExpr
+            | LHIte LHExpr LHExpr LHExpr
             | Brel Brel LHExpr LHExpr
+            | Bop Bop LHExpr LHExpr
             | LHApp Id [LHExpr]
             | LHVar Id
             | LHSym String
+            | LHStringLit String
+            | LHIntLit Integer
+            | LHFloatLit Float
             | Evaluate Expr
             | LHTrue
             deriving Show
@@ -58,7 +65,9 @@ unevaluate :: LHExpr -> Expr
 unevaluate (Evaluate expr) = expr
 unevaluate tm = Term tm 
 
-data Brel = Eq deriving Show
+data Brel = Eq | Neq | Leq | Geq | Lt | Gt deriving Show
+data Bop = Plus | Minus | Times | Div | Mod deriving Show
+data BuildInTps = Integer | Boolean | Double deriving Show
 
 data LHArg = LHArg { lhArgName :: Id, lhArgType :: Type, lhArgReft :: LHExpr} deriving Show
 data Signature = Signature {sigArgs :: [LHArg], sigRes :: LHArg} deriving Show
@@ -109,15 +118,20 @@ renameArg (LHArg name t reft) = LHArg <$> rename name <*> pure t <*> renameReft 
 type Renames = M.Map Id Id
 
 renameReft :: LHExpr -> Reader Renames LHExpr
-renameReft (And es)       = And     <$> mapM renameReft es
-renameReft (Brel b e1 e2) = Brel b  <$> renameReft e1 <*> renameReft e2
-renameReft (LHApp id es)  = LHApp   <$> rename id <*> mapM renameReft es
-renameReft (LHVar id)     = LHVar   <$> rename id
-renameReft (Evaluate expr)= Evaluate<$> renameExpr expr 
-renameReft (LHImpl e1 e2) = LHImpl  <$> renameReft e1 <*> renameReft e2
-renameReft (LHNeg e)      = LHNeg   <$> renameReft e
+renameReft (And es)       = And       <$> mapM renameReft es
+renameReft (Brel b e1 e2) = Brel b    <$> renameReft e1 <*> renameReft e2
+renameReft (Bop b e1 e2)  = Bop b     <$> renameReft e1 <*> renameReft e2
+renameReft (LHApp id es)  = LHApp     <$> rename id <*> mapM renameReft es
+renameReft (LHVar id)     = LHVar     <$> rename id
+renameReft (Evaluate expr)= Evaluate  <$> renameExpr expr 
+renameReft (LHImpl e1 e2) = LHImpl    <$> renameReft e1 <*> renameReft e2
+renameReft (LHIte c e e2) = LHIte     <$> renameReft c <*> renameReft e <*> renameReft e2
+renameReft (LHNeg e)      = LHNeg     <$> renameReft e
 renameReft (LHSym s)      = pure $ LHSym s
 renameReft LHTrue         = pure LHTrue
+renameReft (LHIntLit i)   = pure $ LHIntLit i
+renameReft (LHStringLit s)= pure $ LHStringLit s
+renameReft (LHFloatLit f) = pure $ LHFloatLit f
 
 renamePat :: Pat -> Reader Renames Pat
 renamePat (Pat patCon patArgs) = Pat <$> rename patCon <*> mapM rename patArgs
@@ -184,6 +198,7 @@ transResLHArg s (LHArg _ _ reft) = transProp s reft
 transType :: InternalState -> Type -> C.Expr
 transType _ (TVar tv) = C.Var tv
 transType s (TDat con tys) = C.App con $ map (transType s) tys
+transType s (Buildin b) = C.Buildin $ transBuildin b
 
 transFuncType :: InternalState -> [C.CoqArg] -> C.Type -> C.Type
 transFuncType s argTps ret = foldl C.TFun dom codom where
@@ -209,7 +224,7 @@ transProof s (Term t) | mode s == DefProofMode =
     isSubsetTerm = isSubsetTermExpr s "" tm -- not argument to function application, so giving id that won't match any function
     expectedTyp = let (_, _, spec) = last (defSpecs s) in spec
     castTerm = {-trace ("Casting term "++ show tm ++ " which "++if isSubsetTerm then "is" else "isn't"++ " of subset type into type " ++ C.showArgUnnamed expectedTyp) $-} C.castInto tm isSubsetTerm expectedTyp
-  in [C.Exact $ show castTerm]
+  in [C.Exact castTerm]
 transProof s (Term (LHVar "trivial")) = transProof s Unit
 transProof s (Term (LHApp f es)) = C.Apply (refineApply s f (map (transExpr s) es')): concatMap (transProof s) ps
     where
@@ -244,29 +259,63 @@ translateEqn s expr hints tm =
 
 transBrel :: Brel -> C.Brel
 transBrel Eq = C.Eq
+transBrel Neq = C.Neq
+transBrel Geq = C.Geq
+transBrel Leq = C.Leq
+transBrel Gt = C.Gt
+transBrel Lt = C.Lt
+
+transBop :: Bop -> C.Bop
+transBop Plus = C.Plus
+transBop Minus = C.Minus
+transBop Times = C.Times
+transBop Div = C.Div
+transBop Mod = C.Mod
+
+transBuildin :: BuildInTps -> C.BuildInTps
+transBuildin Integer = C.Integer
+transBuildin Boolean = C.Boolean
+transBuildin Double = C.Double
+
+transOp :: InternalState -> Bop -> LHExpr -> LHExpr -> C.Prop
+transOp s bop t u =
+  let
+    [coqT, coqU] = map (transLHExpr s) [t, u]
+    [pt, pu] = map (projectIfNeeded s) [coqT, coqU]
+  in C.Bop (transBop bop) pt pu
 
 transLHExpr :: InternalState -> LHExpr -> C.Expr
 transLHExpr s (LHApp f es)  = refineApplyLH s f es
+transLHExpr s (LHIte c e e2)= C.Ite (transProp s c) (transLHExpr s e) (transLHExpr s e2)
 transLHExpr s (LHVar x)     = C.Var x
 transLHExpr _ (LHSym s)     = C.Sym s
 transLHExpr s (Evaluate t)  = transExpr s t
-transLHExpr s e             = error "not an expression."
+transLHExpr s (Brel rel t u)= C.EProp $ transRel s rel t u
+transLHExpr s (Bop bop t u) = C.EProp $ transOp s bop t u
+transLHExpr _ (LHIntLit i)  = C.IntLiteral i
+transLHExpr _ (LHStringLit s)= C.StringLiteral s
+transLHExpr _ (LHFloatLit f)= C.FloatLiteral f
+transLHExpr s e             = error $ "not an expression:" ++ show e
 
 
 projectIfNeeded s tm = if isSubsetTermExpr s "" tm then projectIfNeeded s (C.Project tm) else {- trace ("term "++show tm++" isn't of subset type, state:="++show s) -} tm
 
-transEq :: InternalState -> LHExpr -> LHExpr -> C.Prop
-transEq s t u = 
+transRel :: InternalState -> Brel -> LHExpr -> LHExpr -> C.Prop
+transRel s rel t u = 
   let 
     [coqT, coqU] = map (transLHExpr s) [t, u]
     [pt, pu] = map (projectIfNeeded s) [coqT, coqU]
-  in {- trace ("cast equality "++show coqT ++ " = "++show coqU++"to "++show pt ++ " = "++show pu) $ -} C.Brel C.Eq pt pu
+  in C.Brel (transBrel rel) pt pu
+
+transEq :: InternalState -> LHExpr -> LHExpr -> C.Prop
+transEq s = transRel s Eq
 
 transProp :: InternalState -> LHExpr -> C.Prop
-transProp s (Brel Eq e1 e2)       = transEq s e1 e2
--- transProp s (Brel brel e1 e2)     = C.Brel (transBrel brel) (transLHExpr s e1) (transLHExpr s e2)
+transProp s (Brel rel e1 e2)       = transRel s rel e1 e2
 transProp s (LHNeg form)          = C.Neg $ transProp s form
 transProp s (And es)              = C.And $ map (transProp s) es
+transProp s (Or es)              = C.Or $ map (transProp s) es
+transProp s (LHIte c e e2)        = C.PExpr (C.Ite (transProp s c) (transLHExpr s e) (transLHExpr s e2))
 transProp s (LHApp f es)          = C.PExpr $ refineApply s f $ map (transLHExpr s) es
 transProp s (LHVar x)             = C.PExpr $ C.Var x
 transProp s (LHImpl ante concl)   = C.Impl (transProp s ante) $ transProp s concl
@@ -349,6 +398,20 @@ transformInductive s (QMark e1 e2) = do
       Nothing -> do
         mInd2 <- transformInductive s e2
         return $ (\ (arg, e2') -> Just (arg, QMark e1 e2')) =<< mInd2
+transformInductive s (Term(Bop bop e1 e2)) = do
+    mInd1 <- transformInductive s (unevaluate e1)
+    case mInd1 of
+      Just (arg, e1') -> return $ Just (arg, Term $ Bop bop (evaluate e1') e2)
+      Nothing -> do
+        mInd2 <- transformInductive s (unevaluate e2)
+        return $ (\ (arg, e2') -> Just (arg, Term $ Bop bop e1 (evaluate e2'))) =<< mInd2
+transformInductive s (Term(Brel brel e1 e2)) = do
+    mInd1 <- transformInductive s (unevaluate e1)
+    case mInd1 of
+      Just (arg, e1') -> return $ Just (arg, Term $ Brel brel (evaluate e1') e2)
+      Nothing -> do
+        mInd2 <- transformInductive s (unevaluate e2)
+        return $ (\ (arg, e2') -> Just (arg, Term $ Brel brel e1 (evaluate e2'))) =<< mInd2
 transformInductive s eqn@(Eqn expr lstHints lstTm) = 
   let 
     hints = map unevaluate lstHints 
@@ -372,7 +435,7 @@ transformInductive s eqn@(Eqn expr lstHints lstTm) =
               {-indexedHints = trace ("indFromArgs: "++show indFromArgs++", indCallIdx: "++show indIdx++", indFromHintsSimpl: "++show indFromHintsSimpl) $ zip hints [0..]
               indFromHints = trace ("indexedHints: "++show indexedHints++", indVars: "++show indVars) $ checkInductiveCall indVars indexedHints -}
               transformedHints = zipWith (\x y -> case x of Just (_, x) -> x; Nothing -> y) indFromArgs hints
-              transformedEqn = trace("transformedHints: "++show transformedHints) $ Eqn expr (map evaluate transformedHints) lstTm 
+              transformedEqn = {-trace("transformedHints: "++show transformedHints) $-} Eqn expr (map evaluate transformedHints) lstTm 
             return $ fmap (,transformedEqn) indFromHints
 transformInductive _ _ = return Nothing
 
@@ -397,17 +460,21 @@ class Dependencies a where
 instance Dependencies Type where
   dependsOn (TVar typ) name = typ == name
   dependsOn (TDat typ typArgs) name = (typ == name) || any (`dependsOn` name) typArgs
+  dependsOn (Buildin b) _ = False
 
 instance Dependencies LHExpr where
   dependsOn (And exprs) name = any (`dependsOn` name) exprs
+  dependsOn (Or exprs) name = any (`dependsOn` name) exprs
   dependsOn (LHImpl expr expr2) name  = dependsOn expr name || dependsOn expr2 name
   dependsOn (LHNeg expr) name         = dependsOn expr name
   dependsOn (Brel _ expr expr2) name  = dependsOn expr name || dependsOn expr2 name
+  dependsOn (Bop _ expr expr2) name   = dependsOn expr name || dependsOn expr2 name
   dependsOn (LHApp id exprs) name     = id == name || any (`dependsOn` name) exprs
   dependsOn (LHVar id) name           = id == name
   dependsOn LHSym{} _               = False
   dependsOn (Evaluate expr) name      = expr `dependsOn` name
   dependsOn LHTrue _                  = False
+  dependsOn _ _                       = False
 
 instance Dependencies Expr where
   dependsOn (Term t) name                   = t `dependsOn` name

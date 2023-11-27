@@ -8,13 +8,14 @@
 {-# LANGUAGE PackageImports #-}
 module InductNatExample where
 
-{-@ embed GHC.Types.Int as int @-}
+{-@ embed GHC.Types.Int as Int @-}
+{-@ embed GHC.Integer.Type.Integer as Integer @-}
 {-@ embed GHC.Types.Bool as bool @-}
 -- importing the below should make the above embeds unnecessary but it doesn't
 -- import Prelude_LHAssumptions
 
 
-{- HLINT ignore -}
+{- HLInt ignore -}
 import Language.Haskell.Liquid.ProofCombinators
 
 {- {-@ data N [toInt] = Z | Suc N @-} -}
@@ -151,6 +152,7 @@ mult_assoc (Suc m) n o =                    mult (mult (Suc m) n) o
 eqN Z Z = True
 eqN (Suc m) (Suc n) = eqN m n
 eqN _ _ = False
+
 
 -- | Greater than or equals for natural numbers
 {-@ reflect geqN @-}
