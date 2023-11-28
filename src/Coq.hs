@@ -138,7 +138,8 @@ castInto tm refinements expectedTyp =
   let 
     (_, typ, _) = expectedTyp
     expectedRefinements = getRefinementsCoqArg expectedTyp
-    zippedRefs = padZip expectedRefinements refinements
+    zipCorrectly xs ys = reverse $ padZip (reverse xs) (reverse ys)
+    zippedRefs = zipCorrectly expectedRefinements refinements
   in foldr (simpleCastInto typ) tm zippedRefs
 
 refineApplyGeneric :: Show a => LookupState -> (a -> Expr) -> (LookupState -> Id -> a -> [Prop]) -> Id -> [a] -> Expr
