@@ -58,7 +58,7 @@ projectFromSubset (id, _, _) = addParens $ "` "++ id
 isTrivial :: Prop -> Bool
 isTrivial = (==) TT
 
-printTrivial = False
+printTrivial = True
 
 printRef :: Prop-> Bool
 printRef p = printTrivial || not (isTrivial p) 
