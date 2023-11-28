@@ -8,6 +8,7 @@ import Prelude
 import qualified Coq as C
 
 import qualified Data.Map as M
+import Data.Either.Combinators
 import Control.Monad.Reader
 import Data.List(findIndex,find, stripPrefix)
 import Util
@@ -75,11 +76,14 @@ data Signature = Signature {sigArgs :: [LHArg], sigRes :: LHArg} deriving Show
 data TranslationMode = DefinitionMode | ProofMode | DefProofMode deriving (Eq, Show)
 data InternalState = State {specs:: [(Id, [C.CoqArg], Either C.CoqArg C.Prop)], datatypeConstrs :: [Id], datatypeMeasures:: [(Id, Id)], warnings :: [String], mode :: TranslationMode} deriving Show
 defSpecs :: InternalState -> [(Id, [C.CoqArg], C.CoqArg)]
-defSpecs (State specs _ _ _ _) = mapMaybe (\(n, xs, re) -> case re of Left r -> Just (n, xs, r); Right _ -> Nothing) specs
+defSpecs (State specs _ _ _ _) = mapMaybe (\(x, y, e) -> (x,y,) <$> leftToMaybe e) specs
 thmSpecs :: InternalState -> [(Id, [C.CoqArg], C.Prop)]
-thmSpecs (State specs _ _ _ _) = mapMaybe (\(n, xs, re) -> case re of Right r -> Just (n, xs, r); Left _ -> Nothing) specs
+thmSpecs (State specs _ _ _ _) = mapMaybe (\(x, y, e) -> (x,y,) <$> rightToMaybe e) specs
 emptyState :: InternalState
 emptyState = State [] [] [] [] DefinitionMode
+
+toLookupState :: InternalState -> C.LookupState
+toLookupState s = C.State (specs s) (datatypeConstrs s) ((== DefinitionMode) (mode s))
 
 concatState :: InternalState -> InternalState -> InternalState
 concatState (State sps cs m1 w1 _) (State sps2 cs2 m2 w2 f)= State (sps ++ sps2) (cs ++ cs2) (m1 ++ m2) (w1 ++ w2) f
@@ -151,64 +155,16 @@ renameExpr (Let id expr expr2)  = Let   <$> rename id <*> renameExpr expr <*> re
 rename :: Id -> Reader Renames Id
 rename name = asks (fromMaybe name . M.lookup name)
 
-refineApplyWrapper :: Show a => (a-> C.Expr) -> (InternalState -> Id -> a -> Bool) -> InternalState -> Id -> [a] -> C.Expr
-refineApplyWrapper transTm isSubsetTerm s = C.refineApplyGeneric (specs s) transTm isSubsetTm where
-  isSubsetTm _ = isSubsetTerm s
-
--- TODO: improve treatment of nested Subset types and induction hypothesis
-isSubsetTermExpr :: InternalState -> Id -> C.Expr -> Bool
-isSubsetTermExpr s id (C.Inject (C.RExpr _ _ prop) x _) | not (C.printRef prop) = isSubsetTermExpr s id x
-isSubsetTermExpr s id (C.Project (C.Inject typ x prf)) = isSubsetTermExpr s id x
-isSubsetTermExpr s id C.Project{} = False -- TODO: consider cases of nested subset terms
-isSubsetTermExpr _ _ C.Inject {} = True
-isSubsetTermExpr _ _ C.SimpleInject {} = True
--- constructors of data types return (unrefined) elements of that data type
-isSubsetTermExpr s _ exp@(C.App n _) | n `elem` datatypeConstrs s = False
--- induction hypotheses are refined if their function's/theorem's return type is
-isSubsetTermExpr s _ exp@(C.App n@('I':'H':_) exprs) = 
-  let 
-    (_, _, r) = last $ specs s
-    prop = case r of 
-      Left (_, _, x) -> x
-      Right x -> x
-  in C.printTrivial || C.printRef prop
-isSubsetTermExpr s _ exp@(C.App n exprs) | not $ null (find (\(x, _, _) -> x == n) $ defSpecs s) = 
-  let
-    funSpec = fromJust $ find (\(x,_, _) -> x == n) (defSpecs s)
-    (_, _, (_, _, prop)) = funSpec
-  in {-trace ("the refinement of "++show exp ++ " is: "++ show prop) $-} C.printRef prop
-isSubsetTermExpr s _ exp@(C.Var n) | n `elem` datatypeConstrs s = False
-isSubsetTermExpr s _ exp@(C.Var n@('I':'H':_)) = 
-  let 
-    (_, _, r) = last $ specs s
-    prop = case r of 
-      Left (_, _, x) -> x
-      Right x -> x
-  in C.printTrivial || C.printRef prop
-isSubsetTermExpr s "" exp@C.Var{} = isSubsetTermExpr s ((\(n, _, _) -> n) $ (last . specs) s) exp
-isSubsetTermExpr s id exp@(C.Var n) = 
-  let
-    funcSpec = snd <$> find (\(x,_) -> x == id) (map (\(x,y,_) -> (x,y)) (specs s))
-    argSpec = find (\(x,_,_) -> x == n) =<< funcSpec
-  in 
-    case argSpec of
-    -- a hypothesis or result of destructing terms in the proof state
-    Nothing -> trace (show n++" is not an argument to function "++id++". ") False
-    -- if in proof mode, we know that any subset typed argument has long been destructed by now
-    Just arg -> mode s == DefinitionMode && C.isSubsetTermCoqArg (fromJust argSpec)
-isSubsetTermExpr s id e = case e of
-  C.Ite _ expr _ -> isSubsetTermExpr s id expr
-  C.MatchSimple _ patExprs -> isSubsetTermExpr s id $ (snd . head) patExprs
-  C.Match _ _ patExprs -> isSubsetTermExpr s id $ (snd . head) patExprs
-  _ -> C.printTrivial -- error ("Cannot determine if "++show e++" is a subset term. ")
+refineApplyWrapper :: Show a => (a-> C.Expr) -> (C.LookupState -> Id -> a -> [C.Prop]) -> InternalState -> Id -> [a] -> C.Expr
+refineApplyWrapper transTm getRefinements s = C.refineApplyGeneric (toLookupState s) transTm getRefinements
 
 refineApplyArg :: InternalState -> Id -> [C.CoqArg] -> C.Expr
-refineApplyArg = refineApplyWrapper transTm (\_ _ -> C.isSubsetTermCoqArg) where
+refineApplyArg = refineApplyWrapper transTm (\_ _ -> C.getRefinementsCoqArg) where
   transTm :: C.CoqArg -> C.Expr
   transTm (n, typ, ref) = C.Var n
 
 refineApply :: InternalState -> Id -> [C.Expr] -> C.Expr
-refineApply = refineApplyWrapper id isSubsetTermExpr
+refineApply = refineApplyWrapper id C.getRefinementsExpr
 
 refineApplyLH :: InternalState -> Id -> [LHExpr] -> C.Expr
 refineApplyLH s id args = refineApply s id $ map (transLHExpr s) args
@@ -252,9 +208,9 @@ transProof :: InternalState -> Expr -> [C.Tactic]
 transProof s (Term t) | mode s == DefProofMode = 
   let
     tm = transLHExpr s t
-    isSubsetTerm = isSubsetTermExpr s "" tm -- not argument to function application, so giving id that won't match any function
+    refinements = C.getRefinementsExpr (toLookupState s) "" tm -- not argument to function application, so giving "" meaning id of current definition/thm
     expectedTyp = let (_, _, spec) = last (defSpecs s) in spec
-    castTerm = {-trace ("Casting term "++ show tm ++ " which "++(if isSubsetTerm then "is" else "isn't")++ " of subset type into type " ++ C.showArgUnnamed expectedTyp) $-} C.castInto tm isSubsetTerm expectedTyp
+    castTerm = C.castInto tm refinements expectedTyp
   in [C.Exact castTerm]
 transProof s (Term (LHVar "trivial")) = transProof s Unit
 transProof s (Term (LHApp f es)) = C.Apply (refineApply s f (map (transExpr s) es')): concatMap (transProof s) ps
@@ -329,7 +285,7 @@ transLHExpr _ (LHFloatLit f)= C.FloatLiteral f
 transLHExpr s e             = error $ "not an expression:" ++ show e
 
 
-projectIfNeeded s = C.projectIfNeededGeneric (isSubsetTermExpr s "")
+projectIfNeeded s = C.projectIfNeededGeneric (toLookupState s)
 transRel :: InternalState -> Brel -> LHExpr -> LHExpr -> C.Prop
 transRel s rel t u = 
   let 
@@ -475,7 +431,7 @@ transIndDef s (Def name args (Case (Term (LHVar ind)) _ [(_,e1), (_,e2)])) (pos,
   where
     allArgs = nonIndArgs
     nonIndArgs = deleteAt args pos
-    subsetRet = isSubsetTermExpr s name (C.App name (map C.Var args))
+    subsetRet = not $ null (C.getRefinementsExpr (toLookupState s) name (C.App name (map C.Var args)))
     indArg = args !! pos
     indHyp = "IH"++indVar
     induction = if subsetRet then C.Induction indArg indVar indHyp [indHyp] else C.simplInduction indArg indVar indHyp

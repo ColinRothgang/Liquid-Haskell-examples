@@ -196,7 +196,7 @@ translateToCoq srcConts =
       postRef = C.Brel C.Eq unrefApply (LH.projectIfNeeded defnState $ C.Var resId)
       refRet = let (resId, typ, _) = unrefRet in (resId, typ, postRef)
       refDefState = State [(name, coqArgs, Left refRet)] [] [] [] DefinitionMode
-      refinedDef = C.RefDef name coqArgs refRet [(unrefName, coqArgs, Left unrefRet), (name, coqArgs, Left refRet)]
+      refinedDef = C.RefDef name coqArgs refRet (C.fromSpecs [(unrefName, coqArgs, Left unrefRet), (name, coqArgs, Left refRet)])
     in Result (unrefDefState `concatState`  refDefState, map C.DefinitionDeclaration [unrefinedDef, refinedDef])
   translate (Result (s,Theorem name args lhClaim body)) = 
     let

@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE TupleSections #-}
 
 module Coq where
 import Util
@@ -7,6 +8,9 @@ import Prelude
 import Data.List (find)
 import Data.Char (isSpace)
 import Data.Data
+import Data.Either.Combinators
+import Data.Align
+import Data.Tuple.Extra
 
 import Debug.Trace
 
@@ -45,6 +49,9 @@ unrefinedName s = s ++ "_unrefined"
 injectIntoSubset :: Id -> String
 injectIntoSubset t = addParens $ "# "++ t
 
+injectUnrefAppl :: Expr -> String
+injectUnrefAppl tm = addParens $ "exist "++addParens (show tm)++" " ++ "eq_refl"
+
 projectFromSubset :: CoqArg -> String
 projectFromSubset (id, _, _) = addParens $ "` "++ id
 
@@ -56,34 +63,91 @@ printTrivial = False
 printRef :: Prop-> Bool
 printRef p = printTrivial || not (isTrivial p) 
 
-isSubsetTermCoqArg :: CoqArg -> Bool
-isSubsetTermCoqArg (_, _, ref) | printRef ref = True
-isSubsetTermCoqArg (n, RExpr _ _ ref, _)  | printRef ref = True
-isSubsetTermCoqArg (n, RExpr _ typ _, r) = isSubsetTermCoqArg (n, typ, r)
-isSubsetTermCoqArg _ = printTrivial
+data LookupState = State {specs :: [(Id, [CoqArg], Either CoqArg Prop)], datatypeConstrs :: [Id], isDefnMode:: Bool}
+defSpecs :: LookupState -> [(Id, [CoqArg], CoqArg)]
+defSpecs s = mapMaybe (\(x, y, e) -> (x,y,) <$> leftToMaybe e) $ specs s
 
-projectIfNeededGeneric :: (Expr -> Bool) -> Expr -> Expr
-projectIfNeededGeneric isSubsetTm tm = if isSubsetTm tm then projectIfNeededGeneric isSubsetTm (Project tm) else tm
+fromSpecs :: [(Id, [CoqArg], Either CoqArg Prop)] -> LookupState
+fromSpecs specs = State specs [] False
 
-castInto :: Expr -> Bool -> CoqArg -> Expr
-castInto tm isSubsetTerm expectedTyp = 
+getRefinementsLastSpec :: LookupState -> [Prop]
+getRefinementsLastSpec s = maybe [] getRefinementsCoqArg (leftToMaybe r) where
+    (_, _, r) = last $ specs s
+
+-- TODO: improve treatment of nested Subset types and induction hypothesis
+getRefinementsExpr :: LookupState -> Id -> Expr -> [Prop]
+getRefinementsExpr s id (Inject (RExpr _ _ prop) x _) | not (printRef prop) = getRefinementsExpr s id x
+getRefinementsExpr s id (Project (Inject typ x prf)) = getRefinementsExpr s id x
+getRefinementsExpr s id (Project tm) = tail $ getRefinementsExpr s id tm
+getRefinementsExpr s id (Inject (RExpr _ _ prop) tm _) = prop:getRefinementsExpr s id tm
+-- constructors of data types return (unrefined) elements of that data type
+getRefinementsExpr s _ exp@(App n _) | n `elem` datatypeConstrs s = []
+-- induction hypotheses are refined if their function's/theorem's return type is
+getRefinementsExpr s _ exp@(App n@('I':'H':_) exprs) = getRefinementsLastSpec s
+getRefinementsExpr s _ exp@(App n exprs) | not $ null (find ((== n) . fst3) $ defSpecs s) = 
+  let
+    funSpec = fromJust $ find ((== n) . fst3) (defSpecs s)
+    (_, _, coqArg) = funSpec
+  in getRefinementsCoqArg coqArg
+getRefinementsExpr s _ exp@(Var n) | n `elem` datatypeConstrs s = []
+getRefinementsExpr s _ exp@(Var n@('I':'H':_)) = getRefinementsLastSpec s
+getRefinementsExpr s "" exp@Var{} = getRefinementsExpr s (fst3 $ (last . specs) s) exp
+getRefinementsExpr s id exp@(Var n) = 
+  let
+    funcSpec = snd <$> find (\(x,_) -> x == id) (map (\(x,y,_) -> (x,y)) (specs s))
+    argSpec = find ((== n) . fst3) =<< funcSpec
+  in 
+    case argSpec of
+    -- a hypothesis or result of destructing terms in the proof state
+    Nothing -> trace (show n++" is not an argument to function "++id++". ") []
+    -- if in proof mode, we know that any subset typed argument has long been destructed by now
+    Just arg -> if isDefnMode s then getRefinementsCoqArg arg else []
+getRefinementsExpr s id e = case e of
+  Ite _ expr _ -> getRefinementsExpr s id expr
+  MatchSimple _ patExprs -> getRefinementsExpr s id $ (snd . head) patExprs
+  Match _ _ patExprs -> getRefinementsExpr s id $ (snd . head) patExprs
+  _ -> [TT | printTrivial] -- error ("Cannot determine if "++show e++" is a subset term. ")
+
+getRefinementsCoqArg :: CoqArg -> [Prop]
+getRefinementsCoqArg (_, typ, ref) | not $ printRef ref = getRefinements typ
+getRefinementsCoqArg (n, typ, ref)  | isTrivial ref = TT:getRefinements typ
+getRefinementsCoqArg (n, typ, ref) = ref:getRefinements typ
+
+isSubsetTermCoqArg arg = not $ null (getRefinementsCoqArg arg)
+
+-- ret (nested) refinements of (refinement) type
+getRefinements :: Type -> [Prop]
+getRefinements (RExpr _ typ ref) | not $ printRef ref = getRefinements typ
+getRefinements (RExpr _ typ ref) | isTrivial ref = TT:getRefinements typ
+getRefinements (RExpr _ typ ref) = ref:getRefinements typ
+getRefinements _ = []
+
+projectIfNeededGeneric :: LookupState -> Expr -> Expr
+projectIfNeededGeneric s tm = foldr (\_ x -> Project x) tm (getRefinementsExpr s "" tm)
+
+simpleCastInto :: Type -> (Maybe Prop, Maybe Prop) -> Expr -> Expr
+simpleCastInto _ (Nothing, Nothing) tm = tm
+simpleCastInto typ (Just ref, Nothing) tm = Inject (RExpr "" typ ref) tm (ProofTerm "I")
+simpleCastInto _ (Nothing, Just _) tm = Project tm
+simpleCastInto typ (Just need, Just have) tm | need == have = tm
+simpleCastInto typ (Just need, Just have) tm | isTrivial need && not (isTrivial have) = Inject (RExpr "" typ need) (Project tm) (ProofTerm "I")
+simpleCastInto typ (Just need, Just have) tm = tm -- error ("Need to prove subsumption judgement for "++show need ++ " <: "++ show have". ")
+
+castInto :: Expr -> [Prop] -> CoqArg -> Expr
+castInto tm refinements expectedTyp = 
   let 
-    (n, typ, prop) = expectedTyp
-    needSubsetTerm = {-trace ("Calling cast on expr "++ show tm ++ " which " ++ (if isSubsetTerm then "is" else "isn't") ++" of subset type into type "++show expectedTyp ++ " which "++(if printRef prop then "is" else "isn't")++". \n") $-} printRef prop
-  in
-  case (needSubsetTerm, isSubsetTerm) of
-    -- This is a hack that reduces the number of trivial subsumption errors (where we have a non-trivial refinement but need a trivial one)
-    (True, True) -> if isTrivial prop && tm /= Var (show tm) then Inject (RExpr n typ prop) (Project tm) (ProofTerm "I") else tm
-    (True, False) -> Inject (RExpr n typ prop) tm (ProofTerm "I")
-    (False, False) -> tm
-    (False, True) -> Project tm
+    (_, typ, _) = expectedTyp
+    expectedRefinements = getRefinementsCoqArg expectedTyp
+    zippedRefs = padZip expectedRefinements refinements
+  in foldr (simpleCastInto typ) tm zippedRefs
 
-refineApplyGeneric :: Show a => [(Id, [CoqArg], Either CoqArg Prop)] -> (a -> Expr) -> ([(Id, [CoqArg], Either CoqArg Prop)] -> Id -> a -> Bool) -> Id -> [a] -> Expr
-refineApplyGeneric allSpecs transTm isSubsetTm n args = {- trace ("Calling refineApplyGeneric with specs "++ show allSpecs ++ " on: " ++ show (App n (map transTm args))) $ -} App n (zipWith (cast allSpecs n) args [0..]) where
+refineApplyGeneric :: Show a => LookupState -> (a -> Expr) -> (LookupState -> Id -> a -> [Prop]) -> Id -> [a] -> Expr
+refineApplyGeneric s transTm isSubsetTm n args = {- trace ("Calling refineApplyGeneric with specs "++ show allSpecs ++ " on: " ++ show (App n (map transTm args))) $ -} App n (zipWith (cast allSpecs n) args [0..]) where
+  allSpecs = specs s
   lookupArgTyp :: [(Id, [CoqArg], Either CoqArg Prop)] -> Id -> Maybe [CoqArg]
   lookupArgTyp allSpecs id = 
     let
-      spec = (\(_, x, _) -> x) <$> find (\(x, _, _) -> x == id) allSpecs
+      spec = snd3 <$> find ((== id) . fst3) allSpecs
     in spec
 
   hasSpec allSpecs id i = case lookupArgTyp allSpecs id of 
@@ -98,10 +162,10 @@ refineApplyGeneric allSpecs transTm isSubsetTm n args = {- trace ("Calling refin
       needSubsetTerm = printRef prop
       tm = transTm t
     in
-    castInto tm (isSubsetTm allSpecs ((\(n, _, _) -> n) $ last allSpecs) t) (funSpec!!i)
+    castInto tm (isSubsetTm s (fst3 $ last allSpecs) t) (funSpec!!i)
   cast allSpecs id t i | not (hasSpec allSpecs id i) = undefined -- if isSubsetTm allSpecs id t then Project (transTm t) else transTm t
 
-data Def = Def {defName :: Id, defArgs:: [Id], defBody :: Expr} | SpecDef {sdefNAme :: Id, sdefArgs :: [CoqArg], sdefRet :: CoqArg, sdefBody :: [Tactic]} | RefDef {name :: Id, args:: [CoqArg], ret:: CoqArg, state :: [(Id, [CoqArg], Either CoqArg Prop)]}
+data Def = Def {defName :: Id, defArgs:: [Id], defBody :: Expr} | SpecDef {sdefNAme :: Id, sdefArgs :: [CoqArg], sdefRet :: CoqArg, sdefBody :: [Tactic]} | RefDef {name :: Id, args:: [CoqArg], ret:: CoqArg, state :: LookupState}
 instance Show Def where
   show (Def name args body) =
     "Fixpoint " ++ name ++ " " ++ unwords args ++ " :=\n"
@@ -115,19 +179,20 @@ instance Show Def where
       destructArgs args = 
         let destructs = unwords (map destructSubsetArgIfNeeded args) in
         if all isSpace destructs then "" else destructs ++ "\n  "
-  show (RefDef name args retft specs) = 
+  show (RefDef name args retft state) = 
     let
       unrefName = unrefinedName name
-      isSubsetTmDestructedArgs coqArg@(n, _, _) = not (any (\(id, _, _) -> id == n) args) && isSubsetTermCoqArg coqArg
-      unrefinedApply = refineApplyGeneric specs (\(x, _, _) -> Var x) (\_ _ -> isSubsetTmDestructedArgs) unrefName args
-      unrefRet = case ( (\(_,_,ret) -> ret) <$> (find ((== unrefName) . (\(x,_,_)->x)))  specs) of
+      getRefinementsDestructedArgs coqArg@(n, _, _) = if any ((== n) . fst3) args then [] else getRefinementsCoqArg coqArg
+      unrefinedApply = refineApplyGeneric state (Var . fst3) (\_ _ -> getRefinementsDestructedArgs) unrefName args
+      unrefRet = case thd3 <$> find ((== unrefName) . fst3)  (specs state) of
         Just (Left coqArg) -> coqArg
         _ -> error ("No type spec found for "++unrefName++".")
       unrefApplSubsetTp = isSubsetTermCoqArg unrefRet
       unrefRetft = let (n, typ, _) = retft in (n, typ, TT)
       unrefApplCast = if unrefApplSubsetTp then Project unrefinedApply else unrefinedApply
       destructs = unwords (map destructSubsetArgIfNeeded args)
-      refinedDefinien = "Proof.\n  " ++ (if all isSpace destructs then "" else destructs ++ "\n  ") ++ show (Exact (SimpleInject unrefApplCast (ProofTerm "eq_refl"))) ++". \n" ++ "Defined.\n"
+      retTp = uncurry3 RExpr retft 
+      refinedDefinien = "Proof.\n  " ++ (if all isSpace destructs then "" else destructs ++ "\n  ") ++ "exact " ++ addParens (injectUnrefAppl unrefApplCast) ++". \n" ++ "Defined.\n"
       refinedDef = "Definition " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArgUnnamed retft ++ " .\n" ++ refinedDefinien
     in refinedDef
 
@@ -181,7 +246,6 @@ data Expr = App Id [Expr]
           | IntLiteral Integer
           | FloatLiteral Float
           | Inject Type Expr Expr
-          | SimpleInject Expr Expr
           | Project Expr
           | ProofTerm String
           | TrivialProof
@@ -211,7 +275,6 @@ instance Show Expr where
     where
       showBranch (p, e) = "| " ++ show p ++ " => " ++ show e
   show (Ite cond thenE elseE) = "if "++ addParens (show cond) ++ " then "++addParens (show thenE)++" else "++addParens (show elseE)
-  show (SimpleInject x (ProofTerm s)) = addParens $ "exist "++addParens (show x)++" " ++ s
   show (Inject (RExpr id typ ref) x p) =  injectIntoSubset $ addParens (show x) -- addParens $ "inject_into_subset_type " ++ show typ ++ " " ++ show x ++ " " ++ show ref ++ " " ++ show p
   show (Project expr@Var{})   = addParens $ "` " ++ addParens (show expr)
   show (Project expr)   = addParens $ "` " ++ addParens (show expr)

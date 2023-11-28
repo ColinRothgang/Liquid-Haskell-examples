@@ -28,6 +28,9 @@ dependencies:
   - ghc-paths
   - directory
   - unordered-containers
+  - either
+  - semialign
+  - extra
 
 library:
   source-dirs:
