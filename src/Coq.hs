@@ -62,6 +62,9 @@ isSubsetTermCoqArg (n, RExpr _ _ ref, _)  | printRef ref = True
 isSubsetTermCoqArg (n, RExpr _ typ _, r) = isSubsetTermCoqArg (n, typ, r)
 isSubsetTermCoqArg _ = printTrivial
 
+projectIfNeededGeneric :: (Expr -> Bool) -> Expr -> Expr
+projectIfNeededGeneric isSubsetTm tm = if isSubsetTm tm then projectIfNeededGeneric isSubsetTm (Project tm) else tm
+
 castInto :: Expr -> Bool -> CoqArg -> Expr
 castInto tm isSubsetTerm expectedTyp = 
   let 
@@ -96,7 +99,7 @@ refineApplyGeneric allSpecs transTm isSubsetTm n args = {- trace ("Calling refin
       tm = transTm t
     in
     castInto tm (isSubsetTm allSpecs ((\(n, _, _) -> n) $ last allSpecs) t) (funSpec!!i)
-  cast allSpecs id t i | not (hasSpec allSpecs id i) = if isSubsetTm allSpecs id t then Project (transTm t) else transTm t
+  cast allSpecs id t i | not (hasSpec allSpecs id i) = undefined -- if isSubsetTm allSpecs id t then Project (transTm t) else transTm t
 
 data Def = Def {defName :: Id, defArgs:: [Id], defBody :: Expr} | SpecDef {sdefNAme :: Id, sdefArgs :: [CoqArg], sdefRet :: CoqArg, sdefBody :: [Tactic]} | RefDef {name :: Id, args:: [CoqArg], ret:: CoqArg, state :: [(Id, [CoqArg], Either CoqArg Prop)]}
 instance Show Def where

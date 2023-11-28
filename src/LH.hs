@@ -159,7 +159,7 @@ refineApplyWrapper transTm isSubsetTerm s = C.refineApplyGeneric (specs s) trans
 isSubsetTermExpr :: InternalState -> Id -> C.Expr -> Bool
 isSubsetTermExpr s id (C.Inject (C.RExpr _ _ prop) x _) | not (C.printRef prop) = isSubsetTermExpr s id x
 isSubsetTermExpr s id (C.Project (C.Inject typ x prf)) = isSubsetTermExpr s id x
-isSubsetTermExpr s id C.Project{} = False -- TODO: consider cases fo nested subset terms
+isSubsetTermExpr s id C.Project{} = False -- TODO: consider cases of nested subset terms
 isSubsetTermExpr _ _ C.Inject {} = True
 isSubsetTermExpr _ _ C.SimpleInject {} = True
 -- constructors of data types return (unrefined) elements of that data type
@@ -329,8 +329,7 @@ transLHExpr _ (LHFloatLit f)= C.FloatLiteral f
 transLHExpr s e             = error $ "not an expression:" ++ show e
 
 
-projectIfNeeded s tm = if isSubsetTermExpr s "" tm then projectIfNeeded s (C.Project tm) else tm
-
+projectIfNeeded s = C.projectIfNeededGeneric (isSubsetTermExpr s "")
 transRel :: InternalState -> Brel -> LHExpr -> LHExpr -> C.Prop
 transRel s rel t u = 
   let 
