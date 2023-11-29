@@ -180,6 +180,24 @@ Definition inject_into_subset_type (A:Type) (x:A) (H:Prop) (p:H): {x:A | H} := (
 Definition inject_into_trivial_subset_type (A:Type) (x:A) : {v:A | True} := (exist x I).
 Notation "# x" := (exist x I) (at level 60).
 
+Definition subsumptionCast (A:Type) (G:A -> Prop) (H: A -> Prop) (p: forall x, G x -> H x) (x: {x: A | G x}): {y:A | H y}.
+Proof.
+  destruct x as [x Gx]. exact (exist x (p x Gx)). 
+Defined.
+
+(* totally unsound, but for now the easiest approach *)
+Local Definition subsumptionOracle (A:Type) (G:A -> Prop) (H: Prop): forall x, G x -> H.
+Proof.
+  intros x Gx.
+Admitted.
+
+Definition subsumptionCastOracle (A:Type) (G:Prop) (H: Prop) (x: {x: A | G}): {x:A | H}.
+Proof.
+  destruct x as [x Gx].
+  assert (Hx: H).
+  apply subsumptionOracle with A (fun x => G) x. apply Gx.
+  exact (exist x Hx). 
+Defined.
 
 Definition CoqInt := Z.
 Definition CoqFloat := float.

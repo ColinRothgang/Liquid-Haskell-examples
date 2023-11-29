@@ -11,6 +11,7 @@ import Data.Data
 import Data.Either.Combinators
 import Data.Align
 import Data.Tuple.Extra
+import Data.Bifunctor
 
 import Debug.Trace
 
@@ -125,22 +126,31 @@ getRefinements _ = []
 projectIfNeededGeneric :: LookupState -> Expr -> Expr
 projectIfNeededGeneric s tm = foldr (\_ x -> Project x) tm (getRefinementsExpr s "" tm)
 
-simpleCastInto :: Type -> (Maybe Prop, Maybe Prop) -> Expr -> Expr
-simpleCastInto _ (Nothing, Nothing) tm = tm
-simpleCastInto typ (Just ref, Nothing) tm = Inject (RExpr "" typ ref) tm (ProofTerm "I")
-simpleCastInto _ (Nothing, Just _) tm = Project tm
-simpleCastInto typ (Just need, Just have) tm | need == have = tm
-simpleCastInto typ (Just need, Just have) tm | isTrivial need && not (isTrivial have) = Inject (RExpr "" typ need) (Project tm) (ProofTerm "I")
-simpleCastInto typ (Just need, Just have) tm = tm -- error ("Need to prove subsumption judgement for "++show need ++ " <: "++ show have". ")
+subsumptionCasts :: [((Prop, Prop), Type)] -> [Expr -> Expr]
+subsumptionCasts [] = []
+subsumptionCasts [((need, have), typ)] | isTrivial need = [\tm -> Inject (RExpr "" typ need) (Project tm) (ProofTerm "I")]
+subsumptionCasts [((need, have), typ)] = [subsumptionCast typ need have]
+subsumptionCasts reqs | all (uncurry (==) . fst) (init reqs) = [subsumptionCast typ need have] where ((need, have), typ) = last reqs
+subsumptionCasts required = error ("Found more than one subsumption cast: "++show required++" This is unsupported. ")
 
 castInto :: Expr -> [Prop] -> CoqArg -> Expr
 castInto tm refinements expectedTyp = 
   let 
     (_, typ, _) = expectedTyp
     expectedRefinements = getRefinementsCoqArg expectedTyp
-    zipCorrectly xs ys = reverse $ padZip (reverse xs) (reverse ys)
-    zippedRefs = zipCorrectly expectedRefinements refinements
-  in foldr (simpleCastInto typ) tm zippedRefs
+    zippedRefs = padZip (reverse expectedRefinements) (reverse refinements)
+    -- drop matching innermost refinements
+    zippedRefsStripped = dropWhile (uncurry (==)) zippedRefs
+    expectedTyps = scanr (flip (RExpr "")) typ expectedRefinements
+    -- drop the accompanying base (expected) types
+    expectedTypsStripped = drop (length zippedRefs - length zippedRefsStripped) expectedTyps
+    (subsumptionRefs, projInjRefs) = break (\(x,y) -> null x || null y) zippedRefsStripped
+    injectionsRev = zipWith (\(Just ref, Nothing) typ tm -> Inject (RExpr "" typ ref) tm (ProofTerm "I")) projInjRefs expectedTypsStripped
+    (projections, injections) = if null (fst <$> safeHead projInjRefs) then (map (const Project) projInjRefs, []) else ([], reverse injectionsRev)
+    subsumptions = subsumptionCasts (reverse $ zip (map (bimap fromJust fromJust) subsumptionRefs) (take (length subsumptionRefs) expectedTypsStripped))
+    castOperators :: [Expr -> Expr]
+    castOperators = injections ++ subsumptions ++ projections
+  in foldr (\f x -> f x) tm castOperators
 
 refineApplyGeneric :: Show a => LookupState -> (a -> Expr) -> (LookupState -> Id -> a -> [Prop]) -> Id -> [a] -> Expr
 refineApplyGeneric s transTm isSubsetTm n args = {- trace ("Calling refineApplyGeneric with specs "++ show allSpecs ++ " on: " ++ show (App n (map transTm args))) $ -} App n (zipWith (cast allSpecs n) args [0..]) where
@@ -251,13 +261,17 @@ data Expr = App Id [Expr]
           | ProofTerm String
           | TrivialProof
           | EProp Prop
-          | Buildin BuildInTps deriving Data
+          | Buildin BuildInTps
+          | TypArg Type deriving Data
 
 injectTrivially :: Expr -> Expr
 injectTrivially expr = Inject Hole expr $ ProofTerm "I"
 
 injectArgument :: CoqArg -> Expr
 injectArgument (name, typ, reft) = Inject typ (Var name) $ ProofTerm "I"
+
+subsumptionCast :: Type  -> Prop -> Prop -> Expr -> Expr
+subsumptionCast typ need have tm = App "subsumptionCastOracle" $ TypArg typ:[EProp have, EProp need, tm]
 
 instance Show Expr where
   show (Sym s)        = s
@@ -286,6 +300,7 @@ instance Show Expr where
   show (StringLiteral s) = "\"" ++ s ++ "\""
   show (FloatLiteral f) = show f
   show (IntLiteral i) = show i-- "Z_as_Int._"++ show i
+  show (TypArg t) = show t
 
 instance Eq Expr where
   (==) x y = show x == show y
