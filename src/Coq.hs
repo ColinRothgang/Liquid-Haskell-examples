@@ -71,21 +71,21 @@ defSpecs s = mapMaybe (\(x, y, e) -> (x,y,) <$> leftToMaybe e) $ specs s
 fromSpecs :: [(Id, [CoqArg], Either CoqArg Prop)] -> LookupState
 fromSpecs specs = State specs [] False
 
-getRefinementsLastSpec :: LookupState -> [Prop]
+getRefinementsLastSpec :: LookupState -> [(Id, Prop)]
 getRefinementsLastSpec s = maybe [] getRefinementsCoqArg (leftToMaybe r) where
     (_, _, r) = last $ specs s
 
 -- TODO: improve treatment of nested Subset types and induction hypothesis
-getRefinementsExpr :: LookupState -> Id -> Expr -> [Prop]
+getRefinementsExpr :: LookupState -> Id -> Expr -> [(Id, Prop)]
 getRefinementsExpr s id (Inject (RExpr _ _ prop) x _) | not (printRef prop) = getRefinementsExpr s id x
 getRefinementsExpr s id (Project (Inject typ x prf)) = getRefinementsExpr s id x
 getRefinementsExpr s id (Project tm) = tail $ getRefinementsExpr s id tm
-getRefinementsExpr s id (Inject (RExpr _ _ prop) tm _) = prop:getRefinementsExpr s id tm
+getRefinementsExpr s id (Inject (RExpr n _ prop) tm _) = (n, prop):getRefinementsExpr s id tm
 -- constructors of data types return (unrefined) elements of that data type
 getRefinementsExpr s _ exp@(App n _) | n `elem` datatypeConstrs s = []
 -- induction hypotheses are refined if their function's/theorem's return type is
 getRefinementsExpr s _ exp@(App n@('I':'H':_) exprs) = getRefinementsLastSpec s
-getRefinementsExpr s _ exp@(App n exprs) | not $ null (find ((== n) . fst3) $ defSpecs s) = 
+getRefinementsExpr s _ exp@(App n exprs) | isJust (find ((== n) . fst3) $ defSpecs s) = 
   let
     funSpec = fromJust $ find ((== n) . fst3) (defSpecs s)
     (_, _, coqArg) = funSpec
@@ -102,79 +102,86 @@ getRefinementsExpr s id exp@(Var n) =
     -- a hypothesis or result of destructing terms in the proof state
     Nothing -> trace (show n++" is not an argument to function "++id++". ") []
     -- if in proof mode, we know that any subset typed argument has long been destructed by now
-    Just arg -> if isDefnMode s then getRefinementsCoqArg arg else []
+    Just arg -> 
+      if isDefnMode s then getRefinementsCoqArg arg else []
 getRefinementsExpr s id e = case e of
   Ite _ expr _ -> getRefinementsExpr s id expr
   MatchSimple _ patExprs -> getRefinementsExpr s id $ (snd . head) patExprs
   Match _ _ patExprs -> getRefinementsExpr s id $ (snd . head) patExprs
-  _ -> [TT | printTrivial] -- error ("Cannot determine if "++show e++" is a subset term. ")
+  _ -> [("_", TT) | printTrivial] -- error ("Cannot determine if "++show e++" is a subset term. ")
 
-getRefinementsCoqArg :: CoqArg -> [Prop]
+getRefinementsCoqArg :: CoqArg -> [(Id, Prop)]
 getRefinementsCoqArg (_, typ, ref) | not $ printRef ref = getRefinements typ
-getRefinementsCoqArg (n, typ, ref)  | isTrivial ref = TT:getRefinements typ
-getRefinementsCoqArg (n, typ, ref) = ref:getRefinements typ
+-- getRefinementsCoqArg (n, typ, ref)  | isTrivial ref = (n, TT):getRefinements typ
+getRefinementsCoqArg (n, typ, ref) = (n, ref):getRefinements typ
 
 isSubsetTermCoqArg arg = not $ null (getRefinementsCoqArg arg)
 
 -- ret (nested) refinements of (refinement) type
-getRefinements :: Type -> [Prop]
+getRefinements :: Type -> [(Id, Prop)]
 getRefinements (RExpr _ typ ref) | not $ printRef ref = getRefinements typ
-getRefinements (RExpr _ typ ref) | isTrivial ref = TT:getRefinements typ
-getRefinements (RExpr _ typ ref) = ref:getRefinements typ
+getRefinements (RExpr n typ ref) | isTrivial ref = (n, TT):getRefinements typ
+getRefinements (RExpr n typ ref) = (n, ref):getRefinements typ
 getRefinements _ = []
 
 projectIfNeededGeneric :: LookupState -> Expr -> Expr
 projectIfNeededGeneric s tm = foldr (\_ x -> Project x) tm (getRefinementsExpr s "" tm)
 
-subsumptionCasts :: [((Prop, Prop), Type)] -> [Expr -> Expr]
-subsumptionCasts [] = []
-subsumptionCasts [((need, have), typ)] | isTrivial need = [\tm -> Inject (RExpr "" typ need) (Project tm) (ProofTerm "I")]
-subsumptionCasts [((need, have), typ)] = [subsumptionCast typ need have]
-subsumptionCasts reqs | all (uncurry (==) . fst) (init reqs) = [subsumptionCast typ need have] where ((need, have), typ) = last reqs
-subsumptionCasts required = error ("Found more than one subsumption cast: "++show required++" This is unsupported. ")
+subsumptionCasts :: LookupState -> [(((Id, Prop), (Id, Prop)), Type)] -> [Expr -> Expr]
+subsumptionCasts _ [] = []
+-- subsumptionCasts [((need, have), typ)] | isTrivial need = [\tm -> Inject (RExpr "" typ need) (Project tm) (ProofTerm "I")]
+subsumptionCasts s [((need, have), typ)] = [subsumptionCast s typ need have]
+subsumptionCasts s reqs | all (uncurry (==) . fst) reqsTl = [subsumptionCast s typ need have] where ((need, have), typ):reqsTl = reqs
+subsumptionCasts _ required = error ("Found more than one subsumption cast: "++show required++" This is unsupported. ")
 
-castInto :: Expr -> [Prop] -> CoqArg -> Expr
-castInto tm refinements expectedTyp = 
+castInto :: LookupState -> Expr -> [(Id, Prop)] -> Either CoqArg Type -> Expr
+castInto s tm refinements expectedTyp = 
   let 
-    (_, typ, _) = expectedTyp
-    expectedRefinements = getRefinementsCoqArg expectedTyp
+    typ = either id id $ mapLeft snd3 expectedTyp
+    expectedRefinements = either getRefinementsCoqArg (const []) expectedTyp
     zippedRefs = padZip (reverse expectedRefinements) (reverse refinements)
     -- drop matching innermost refinements
     zippedRefsStripped = dropWhile (uncurry (==)) zippedRefs
-    expectedTyps = scanr (flip (RExpr "")) typ expectedRefinements
+    expectedTyps = scanr (\(n,r) t -> RExpr n t r) typ expectedRefinements
     -- drop the accompanying base (expected) types
     expectedTypsStripped = drop (length zippedRefs - length zippedRefsStripped) expectedTyps
-    (subsumptionRefs, projInjRefs) = break (\(x,y) -> null x || null y) zippedRefsStripped
-    injectionsRev = zipWith (\(Just ref, Nothing) typ tm -> Inject (RExpr "" typ ref) tm (ProofTerm "I")) projInjRefs expectedTypsStripped
-    (projections, injections) = if null (fst <$> safeHead projInjRefs) then (map (const Project) projInjRefs, []) else ([], reverse injectionsRev)
-    subsumptions = subsumptionCasts (reverse $ zip (map (bimap fromJust fromJust) subsumptionRefs) (take (length subsumptionRefs) expectedTypsStripped))
+    (subsumptionRefs, projInjRefs) = break (\(x,y) -> isNothing x || isNothing y) zippedRefsStripped
+    inject (Just (n, ref), Nothing) typ tm = Inject (RExpr n typ ref) tm (ProofTerm (if isDefnMode s then "I" else "_"))
+    injectionsRev = zipWith inject projInjRefs expectedTypsStripped
+    (projections, injections) = if isNothing (fst =<< safeHead projInjRefs) then (map (const Project) projInjRefs, []) else ([], reverse injectionsRev)
+    subsumptions = subsumptionCasts s (reverse $ zip (map (bimap fromJust fromJust) subsumptionRefs) (take (length subsumptionRefs) expectedTypsStripped))
     castOperators :: [Expr -> Expr]
     castOperators = injections ++ subsumptions ++ projections
   in foldr (\f x -> f x) tm castOperators
 
-refineApplyGeneric :: Show a => LookupState -> (a -> Expr) -> (LookupState -> Id -> a -> [Prop]) -> Id -> [a] -> Expr
-refineApplyGeneric s transTm isSubsetTm n args = {- trace ("Calling refineApplyGeneric with specs "++ show allSpecs ++ " on: " ++ show (App n (map transTm args))) $ -} App n (zipWith (cast allSpecs n) args [0..]) where
+refineApplyGeneric :: Show a => LookupState -> (a -> Expr) -> (LookupState -> Id -> a -> [(Id, Prop)]) -> Id -> [a] -> Expr
+refineApplyGeneric s transTm getRefs n args = {- trace ("Calling refineApplyGeneric with specs "++ show allSpecs ++ " on: " ++ show (App n (map transTm args))) $ -} App n (zipWith cast args [0..]) where
   allSpecs = specs s
-  lookupArgTyp :: [(Id, [CoqArg], Either CoqArg Prop)] -> Id -> Maybe [CoqArg]
-  lookupArgTyp allSpecs id = 
+  lookupArgTyp :: Maybe [CoqArg]
+  lookupArgTyp = 
     let
-      spec = snd3 <$> find ((== id) . fst3) allSpecs
+      spec = snd3 <$> find ((== n) . fst3) allSpecs
     in spec
 
-  hasSpec allSpecs id i = case lookupArgTyp allSpecs id of 
+  hasSpec i = case lookupArgTyp of 
     Just argTps -> 
-      (length argTps >= i + 1) || error ("looked up specification of function " ++ id ++ " has only "++ show (length argTps) ++" arguments but is applied to at least "++ show (i + 1) ++ " arguments. ")
+      (length argTps >= i + 1) || error ("looked up specification of function " ++ n ++ " has only "++ show (length argTps) ++" arguments but is applied to at least "++ show (i + 1) ++ " arguments. ")
     _ -> False
 
-  cast allSpecs id t i | hasSpec allSpecs id i =
+  cast t i | hasSpec i =
     let
-      funSpec = fromJust $ lookupArgTyp allSpecs id
-      (n, typ, prop) = funSpec!!i
-      needSubsetTerm = printRef prop
+      funSpec = fromJust lookupArgTyp
       tm = transTm t
+      expectedSpec = funSpec!!i
+      (_, typ, ref) = expectedSpec
+      dataArg = n `elem` datatypeConstrs s
+      dataArgTyp = (either snd3 (error "Found proposition as return type of data constructor.")  . thd3 <$> find ((==n) . fst3) allSpecs)
+      dataRes = Just typ == (either snd3 (error "Found proposition as return type of data constructor.")  . thd3 <$> find ((==n) . fst3) allSpecs)
+      triviallyRefined = isTrivial ref
+      expected = if dataArg && dataRes && isTrivial ref then Right typ else Left expectedSpec
     in
-    castInto tm (isSubsetTm s (fst3 $ last allSpecs) t) (funSpec!!i)
-  cast allSpecs id t i | not (hasSpec allSpecs id i) = undefined -- if isSubsetTm allSpecs id t then Project (transTm t) else transTm t
+    castInto s tm (getRefs s (fst3 $ last allSpecs) t) expected
+  cast t i | not (hasSpec i) = error $ "No specs found for "++n -- if getRefs allSpecs id t then Project (transTm t) else transTm t
 
 data Def = Def {defName :: Id, defArgs:: [Id], defBody :: Expr} | SpecDef {sdefNAme :: Id, sdefArgs :: [CoqArg], sdefRet :: CoqArg, sdefBody :: [Tactic]} | RefDef {name :: Id, args:: [CoqArg], ret:: CoqArg, state :: LookupState}
 instance Show Def where
@@ -208,13 +215,13 @@ instance Show Def where
     in refinedDef
 
 
-data Constant = Const {id :: Id, body :: Expr}
+data Constant = Const {constId :: Id, body :: Expr}
 instance Show Constant where
   show (Const name body) = "Definition " ++ name ++ " := "++ show body ++ ". "
 
 newtype Load = Load {moduleName :: Id}
 instance Show Load where
-  show (Load name) = "Load " ++ name ++ ". "
+  show (Load name) = "Require " ++ name ++ ". "
 
 data NewType = NewType {typeName :: Id, defin :: Type}
 instance Show NewType where
@@ -258,11 +265,13 @@ data Expr = App Id [Expr]
           | FloatLiteral Float
           | Inject Type Expr Expr
           | Project Expr
+          | SubCast Type (Id, Prop) (Id, Prop) Expr (Maybe Expr)
           | ProofTerm String
           | TrivialProof
           | EProp Prop
           | Buildin BuildInTps
-          | TypArg Type deriving Data
+          | TypArg Type
+          | Lambda Id Type Expr deriving Data
 
 injectTrivially :: Expr -> Expr
 injectTrivially expr = Inject Hole expr $ ProofTerm "I"
@@ -270,8 +279,8 @@ injectTrivially expr = Inject Hole expr $ ProofTerm "I"
 injectArgument :: CoqArg -> Expr
 injectArgument (name, typ, reft) = Inject typ (Var name) $ ProofTerm "I"
 
-subsumptionCast :: Type  -> Prop -> Prop -> Expr -> Expr
-subsumptionCast typ need have tm = App "subsumptionCastOracle" $ TypArg typ:[EProp have, EProp need, tm]
+subsumptionCast :: LookupState -> Type  -> (Id, Prop) -> (Id, Prop) -> Expr -> Expr
+subsumptionCast s typ need have tm = SubCast typ need have tm (if isDefnMode s then Just $ ProofTerm "I" else Nothing)
 
 instance Show Expr where
   show (Sym s)        = s
@@ -293,6 +302,8 @@ instance Show Expr where
   show (Inject (RExpr id typ ref) x p) =  injectIntoSubset $ addParens (show x) -- addParens $ "inject_into_subset_type " ++ show typ ++ " " ++ show x ++ " " ++ show ref ++ " " ++ show p
   show (Project expr@Var{})   = addParens $ "` " ++ addParens (show expr)
   show (Project expr)   = addParens $ "` " ++ addParens (show expr)
+  show (SubCast (RExpr _ typ ref) (n,need) (m,have) tm prfO) = addParens $ unwords ("subsumptionCast":[show typ, addParens $ show (Lambda n typ (EProp need)), addParens $ show (Lambda m typ (EProp have)), maybe "_" show prfO, addParens $ show tm])
+  show (SubCast typ (n, need) (m, have) tm prfO) = addParens $ unwords ("subsumptionCast":[show typ, addParens $ show (Lambda n typ (EProp need)), addParens $ show (Lambda m typ (EProp have)), maybe "_" show prfO, addParens $ show tm]) --show tm ++ " ↠ " ++ show need
   show (ProofTerm prf)  = prf
   show TrivialProof = show Trivial
   show (EProp p) = show p
@@ -301,6 +312,7 @@ instance Show Expr where
   show (FloatLiteral f) = show f
   show (IntLiteral i) = show i-- "Z_as_Int._"++ show i
   show (TypArg t) = show t
+  show (Lambda n typ body) = addParens $ "fun "++n++": "++show typ++" => "++show body
 
 instance Eq Expr where
   (==) x y = show x == show y
@@ -316,7 +328,7 @@ destructSubsetArgIfNeeded :: CoqArg -> String
 destructSubsetArgIfNeeded (n, ty, ref) | not $ printRef ref = ""
 destructSubsetArgIfNeeded coqArg = show . destructSubsetArg $ coqArg
 
-data Type = TExpr Expr | TProp Prop | RExpr Id Type Prop | TFun Type Type | Hole deriving Data
+data Type = TExpr Expr | TProp Prop | RExpr Id Type Prop | TFun Type Type | Hole deriving (Eq, Data)
 instance Show Type where
   show (TExpr e) = show e
   show (TProp p) = show p
@@ -389,7 +401,7 @@ data Tactic = Trivial
             | Revert [Id]
             | Now Tactic
             | Solve Expr
-            | Exact Expr
+            | Exact Expr deriving Data
 
 simplInduction arg var hyp = Induction arg var hyp [var, hyp]
 
@@ -411,6 +423,9 @@ instance Show Tactic where
   show (Destruct (Var n) binds branches) =
       "destruct " ++ n ++ " as [" ++ intercalate " | " (map unwords binds) ++ " ]. "
       ++ showBranches branches
+  show (Destruct e binds branches) = 
+      "destruct " ++ show e ++ " as [" ++ intercalate " | " (map unwords binds) ++ " ]. "
+      ++ showBranches branches
   show (Induction arg var hyp introPats branches) =
       "induction " ++ arg ++ " as [| " ++ unwords introPats ++ " ]. "
       ++ showBranches branches
@@ -420,7 +435,7 @@ instance Show Tactic where
   show (Intros ids) = "intros " ++ unwords ids
   show (Revert ids) = "revert " ++ unwords ids
   show (Now t) = "now " ++ show t
-  show (Exact x) = "exact "++ addParens (show x)
+  show (Exact x) = "refine "++ addParens (show x)
 
 showBranches :: [[Tactic]] -> String
 showBranches = intercalate ". " . map showBranch

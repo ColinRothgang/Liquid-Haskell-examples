@@ -37,14 +37,16 @@ run args = do
       dataDecls = undefined  -- we need to somehow get the data declarations from the LH source as well, but they are not contained in the binds
       specMap = SLH.transSig <$> M.fromList specs
       inputFilePath = split '/' (head args)
-      fileName = last inputFilePath 
+      stripSuffix suf s = maybe s reverse (stripPrefix (reverse suf) (reverse s))
+      fileName = last inputFilePath
+      filename = stripSuffix ".hs" fileName
       inputFolderName = intercalate "/" (init inputFilePath)
     inputFolderPath <- getCurrentDirectory
     let
       inputFolder = inputFolderPath ++ "/" ++ inputFolderName
     putStrLn $ "\nInput file directory: " ++ inputFolder
     let
-      outputPath = "out/"++fileName++".v"
+      outputPath = "out/"++filename++".v"
       lhDefs = map CLH.transBind (simplify <$> binds)
       defsAndProofs = parseDefsAndProofs $ pairLHDefsWithSigs lhDefs specMap
 
@@ -167,14 +169,14 @@ translateToCoq srcConts =
     translateBranch :: Id -> InternalState -> (Id, [Type]) -> StateResult (Id, C.Type)
     translateBranch n s (bn, argTps) = 
       do
-        registerDataDefSpecs bn coqArgs (bn, funcTyp, C.TT)
+        registerDataDefSpecs bn coqArgs (bn, ret, C.TT)
 
         pure (bn, funcTyp)
         where
           argsT = map (C.TExpr . transType s) argTps
           coqArgs = zipWith (\i x -> ("x"++show i, x, C.TT)) [1..] argsT
           ret = C.TExpr $ C.Var n
-          funcTyp = transFuncType s coqArgs ret
+          funcTyp = transFuncType s argsT ret
           
   translate (Result (s,Alias n expr)) = pure [C.ConstantDeclaration $ C.Const n (transExpr s expr)]
   translate (Result (s, Definition name args retrf@(LHArg resId ret post) body)) = 

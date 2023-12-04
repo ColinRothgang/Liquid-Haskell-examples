@@ -3,31 +3,31 @@ Require Import Logic.
 Require Import Specif.
 
 (** to enable rewriting using other relations not just = *)
-Require Import Setoid.
+Require Export Setoid.
 (** to rewrite using <-> *)
-Require Import Classes.Morphisms_Prop.
+Require Export Classes.Morphisms_Prop.
 
 Require Export Logic.ProofIrrelevanceFacts.
 Require Export Program.Subset.
 Require Export Init.Tactics.
 
-Require Import Arith.
+Require Export Arith.
 Require Import Program.
 Require Import omega.OmegaLemmas.
-From Equations Require Import Equations.
+From Equations Require Export Equations.
 
 Require Import Lia.
 
-(** Require Init.Peano.
-Require Arith.PeanoNat.*)
-Require Classes.RelationClasses.
+Require Init.Peano.
+Require Arith.PeanoNat.
+Require Export Classes.RelationClasses.
 
 Require Export ZArith Int.
 Open Scope Z_scope.
 Open Scope Int_scope.
 Require Export Floats.
 
-Load LibTactics.
+Require Export LibTactics.
 
 
 (** The first two tactics are taken from https://gitlab.mpi-sws.org/iris/stdpp/-/blob/df33944852793fd7a93368b6b0251e9f29a3c4dd/stdpp/tactics.v#L45-78 (they are BSD licensed).*)
@@ -75,6 +75,7 @@ Require Import SMTCoq.SMTCoq.
 Require Import Bool.
 
 Require Import ZArith.
+
 
 Import BVList.BITVECTOR_LIST.
 From Sniper Require Import Sniper. 
@@ -174,7 +175,7 @@ Ltac smt_app_ih IH :=
 Ltac smt_done := if_not_done (try ple); if_not_done (try smt_trivial); if_not_done (try snipe).
 
 (* equality on subset types with proof irrelevance *)
-Notation "x `= y" := (@eq _ (`x) (`y)) (at level 70).
+Notation "x `= y" := (@eq _ (` x) (` y)) (at level 70).
 
 Definition inject_into_subset_type (A:Type) (x:A) (H:Prop) (p:H): {x:A | H} := (exist x p).
 Definition inject_into_trivial_subset_type (A:Type) (x:A) : {v:A | True} := (exist x I).
@@ -185,19 +186,43 @@ Proof.
   destruct x as [x Gx]. exact (exist x (p x Gx)). 
 Defined.
 
-(* totally unsound, but for now the easiest approach *)
-Local Definition subsumptionOracle (A:Type) (G:A -> Prop) (H: Prop): forall x, G x -> H.
-Proof.
-  intros x Gx.
-Admitted.
-
-Definition subsumptionCastOracle (A:Type) (G:Prop) (H: Prop) (x: {x: A | G}): {x:A | H}.
+Definition subCast (A:Type) (G:Prop) (H: Prop) (x: {x: A | G}) (p: G -> H): {x:A | H}.
 Proof.
   destruct x as [x Gx].
   assert (Hx: H).
-  apply subsumptionOracle with A (fun x => G) x. apply Gx.
+  apply p in Gx as Hx. apply Hx.
   exact (exist x Hx). 
 Defined.
+Local Definition test: {v:Prop|True} := subCast Prop True True (exist True I) (fun (H : True) => H).
 
 Definition CoqInt := Z.
 Definition CoqFloat := float.
+
+(* Suggested by Michael Greenberg, but I don't know how this can be written,
+without Coq complaining about undefined arguments (G, H, A1, A2, B1, B2)
+Inductive sub : Type -> Type -> Prop :=
+sub_ref : (forall x, G x -> H x) -> sub { v | G x} {v | H x}
+| sub_fun : sub A2 A1 -> sub B1 B2 -> sub (A1 -> B1) (A2 -> B2).
+(* for constructors of inductive data types which return unrefined terms*)
+| sub_triv: (forall x:A, H x) -> sub A {v:A| H x}
+Notation "A <: B" := (sub A B) (at level 40). *)
+
+(*
+Reserved Notation "A ⊆ B" (at level 40).
+Definition sub_ref (A:Type) (G:A->Prop) (H:A->Prop): (forall x:A, G x -> H x) -> {v| G v} ⊆ {v|H x}.*)
+
+
+Notation "x ↠ H p" := (subCast _ _ H x p) (at level 60).
+Notation "x ↠ H" := (subCast _ _ H x _) (at level 60).
+
+Definition app_sub (A:Type) (B:Type) (G:A->Prop) (H:A->Prop) (f: {x:A | H x} -> B) (x: {v:A | G v}) (p: forall x:A, G x -> H x): B.
+Proof.
+  destruct x as [v Gv]. apply p in Gv as Hv.
+  exact (f (exist v Hv)). 
+Defined.
+
+(* for applications to terms which are either full applications of constructors or terms destructed into unrefined terms for inductive reasoning *)
+Definition app_sub_ind (A:Type) (B:Type) (H:A->Prop) (f: {x:A | H x} -> B) (x: A) (p: H x): B.
+Proof.
+  exact (f (exist x p)). 
+Defined.

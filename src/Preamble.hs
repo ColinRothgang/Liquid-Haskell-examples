@@ -11,7 +11,7 @@ lhPreamble = [natDecl] where
 preamble :: [String]
 preamble = [load_tactics, zscope, intscope]
   where
-    load_tactics    = "Load LHCoqTactics."
+    load_tactics    = "Require Import LHCoqTactics.\nNotation \"` y\" := (proj1_sig y) (at level 70)." -- \nNotation \"x ↠ H p\" := (subCast _ _ H x p) (at level 60).\nNotation \"x ↠ H\" := (subCast _ _ H x _) (at level 60)." --"Require LHCoqTactics."
     zscope = "Open Scope Z_scope."
     intscope = "Open Scope Int_scope."
     ltacs = [ple, smtTrivial, smtApp, smtSolve]

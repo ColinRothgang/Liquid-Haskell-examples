@@ -155,7 +155,7 @@ renameExpr (Let id expr expr2)  = Let   <$> rename id <*> renameExpr expr <*> re
 rename :: Id -> Reader Renames Id
 rename name = asks (fromMaybe name . M.lookup name)
 
-refineApplyWrapper :: Show a => (a-> C.Expr) -> (C.LookupState -> Id -> a -> [C.Prop]) -> InternalState -> Id -> [a] -> C.Expr
+refineApplyWrapper :: Show a => (a-> C.Expr) -> (C.LookupState -> Id -> a -> [(Id, C.Prop)]) -> InternalState -> Id -> [a] -> C.Expr
 refineApplyWrapper transTm getRefinements s = C.refineApplyGeneric (toLookupState s) transTm getRefinements
 
 refineApplyArg :: InternalState -> Id -> [C.CoqArg] -> C.Expr
@@ -187,9 +187,8 @@ transType _ (TVar tv) = C.Var tv
 transType s (TDat con tys) = C.App con $ map (transType s) tys
 transType s (Buildin b) = C.Buildin $ transBuildin b
 
-transFuncType :: InternalState -> [C.CoqArg] -> C.Type -> C.Type
-transFuncType s argTps ret = foldl C.TFun dom codom where
-    args = map (\(n, typ, ref) -> C.RExpr n typ ref) argTps
+transFuncType :: InternalState -> [C.Type] -> C.Type -> C.Type
+transFuncType s args ret = foldl C.TFun dom codom where
     dom:codom = args ++ [ret]
 
 transPat :: Pat -> C.Pat
@@ -210,7 +209,7 @@ transProof s (Term t) | mode s == DefProofMode =
     tm = transLHExpr s t
     refinements = C.getRefinementsExpr (toLookupState s) "" tm -- not argument to function application, so giving "" meaning id of current definition/thm
     expectedTyp = let (_, _, spec) = last (defSpecs s) in spec
-    castTerm = C.castInto tm refinements expectedTyp
+    castTerm = C.castInto (toLookupState s) tm refinements $ Left expectedTyp
   in [C.Exact castTerm]
 transProof s (Term (LHVar "trivial")) = transProof s Unit
 transProof s (Term (LHApp f es)) = C.Apply (refineApply s f (map (transExpr s) es')): concatMap (transProof s) ps
@@ -431,10 +430,9 @@ transIndDef s (Def name args (Case (Term (LHVar ind)) _ [(_,e1), (_,e2)])) (pos,
   where
     allArgs = nonIndArgs
     nonIndArgs = deleteAt args pos
-    subsetRet = not $ null (C.getRefinementsExpr (toLookupState s) name (C.App name (map C.Var args)))
     indArg = args !! pos
     indHyp = "IH"++indVar
-    induction = if subsetRet then C.Induction indArg indVar indHyp [indHyp] else C.simplInduction indArg indVar indHyp
+    induction = C.simplInduction indArg indVar indHyp
 transIndDef _ def _ = error $ "unhandled proof case of " ++ show def
 
 transBranch :: InternalState -> Expr -> [C.Tactic]

@@ -2,4 +2,6 @@
 -arg -w -arg -deprecated-hint-without-locality
 
 LHCoqTactics.v
+LHCoqTactics.v
+IntNatExample.v
 InductNatExample.v
