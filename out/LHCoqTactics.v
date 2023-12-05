@@ -181,23 +181,59 @@ Definition inject_into_subset_type (A:Type) (x:A) (H:Prop) (p:H): {x:A | H} := (
 Definition inject_into_trivial_subset_type (A:Type) (x:A) : {v:A | True} := (exist x I).
 Notation "# x" := (exist x I) (at level 60).
 
+Inductive sub : Type -> Type -> Prop :=
+| sub_ref : forall (T:Type) (G:T->Prop) (H:T->Prop), (forall x, G x -> H x) -> sub {x:T | G x} {x:T | H x}
+| sub_fun : forall (A1 B1 A2 B2:Type), sub A2 A1 -> sub B1 B2 -> sub (A1 -> B1) (A2 -> B2)
+(* for constructors of inductive data types which return unrefined terms*)
+| sub_triv: forall (A:Type) (H:A->Prop), (forall x, H x) -> sub A {x:A | H x}.
+Notation "A <: B" := (sub A B) (at level 40). 
+
+From Coq Require Import FunctionalExtensionality PropExtensionality.
+Lemma sub_inversion : forall (A A':Type), (A<:A') -> (exists (T:Type) (G:T->Prop) (H:T->Prop), (A = {x:T|G x} /\ A' = {x:T|H x} /\ forall (x:T), G x -> H x)) \/ (exists (A1 B1 A2 B2:Type), (A = forall _ : A1, B1) /\ (A' = forall _:A2, B2) /\ (A2 <: A1) /\ (B1 <: B2)) \/ (exists (H:A->Prop), A' = {x:A| H x} /\ (forall x:A, H x)).
+Proof.
+  intros A A' p.
+  destruct p.
+  - left. exists T G H. auto.
+  - right. left. exists A1 B1 A2 B2. auto. 
+  - right. right. exists H. auto.
+Qed.
+
+Definition app_sub : forall (A B A':Type), (A -> B) -> A' -> (A' <: A) -> B.
+Proof.
+  intros A B A' f x p.
+Admitted.
+
+Definition or_elim : forall (B:Type) (C D: Prop) (f:C -> B) (g:D->B), ((C \/ D) -> B).
+Proof.
+  intros B C D f g p.
+Admitted.
+
+Definition or_elim3 : forall (B:Type) (C D E: Prop) (f:C -> B) (g:D->B) (h:E->B) (p: C \/ D \/ E), B.
+Proof.
+  intros B C D E f g h p.
+  apply or_elim with (C:=C) (D:=D\/E). apply f. apply or_elim with (C:=D) (D:=E). apply g. apply h. apply p. 
+Qed.
+
+
+Definition subCast : forall (A A':Type), A -> (A <: A') -> A'.
+Proof.
+  intros A A' x p. 
+  assert (H: (exists (T:Type) (G:T->Prop) (H:T->Prop), (A = {x:T|G x} /\ A' = {x:T|H x} /\ forall (x:T), G x -> H x)) \/ (exists (A1 B1 A2 B2:Type), (A = forall _ : A1, B1) /\ (A' = forall _:A2, B2) /\ (A2 <: A1) /\ (B1 <: B2)) \/ (exists (H:A->Prop), A' = {x:A| H x} /\ (forall x:A, H x))).
+  { exact (sub_inversion A A' p). } clear p.
+  apply or_elim3 with (C:=(exists (T:Type) (G:T->Prop) (H:T->Prop), (A = {x:T|G x} /\ A' = {x:T|H x} /\ forall (x:T), G x -> H x))) (D:=(exists (A1 B1 A2 B2:Type), (A = forall _ : A1, B1) /\ (A' = forall _:A2, B2) /\ (A2 <: A1) /\ (B1 <: B2))) (E:=(exists (H:A->Prop), A' = {x:A| H x} /\ (forall x:A, H x))).
+  - 
+Admitted.
+  
+
 Definition subsumptionCast (A:Type) (G:A -> Prop) (H: A -> Prop) (p: forall x, G x -> H x) (x: {x: A | G x}): {y:A | H y}.
 Proof.
   destruct x as [x Gx]. exact (exist x (p x Gx)). 
 Defined.
 
-Definition subCast (A:Type) (G:Prop) (H: Prop) (x: {x: A | G}) (p: G -> H): {x:A | H}.
-Proof.
-  destruct x as [x Gx].
-  assert (Hx: H).
-  apply p in Gx as Hx. apply Hx.
-  exact (exist x Hx). 
-Defined.
-Local Definition test: {v:Prop|True} := subCast Prop True True (exist True I) (fun (H : True) => H).
-
 Definition CoqInt := Z.
 Definition CoqFloat := float.
 
+(*
 (* Suggested by Michael Greenberg, but I don't know how this can be written,
 without Coq complaining about undefined arguments (G, H, A1, A2, B1, B2)
 Inductive sub : Type -> Type -> Prop :=
@@ -211,18 +247,19 @@ Notation "A <: B" := (sub A B) (at level 40). *)
 Reserved Notation "A ⊆ B" (at level 40).
 Definition sub_ref (A:Type) (G:A->Prop) (H:A->Prop): (forall x:A, G x -> H x) -> {v| G v} ⊆ {v|H x}.*)
 
-
+(*
 Notation "x ↠ H p" := (subCast _ _ H x p) (at level 60).
-Notation "x ↠ H" := (subCast _ _ H x _) (at level 60).
+Notation "x ↠ H" := (subCast _ _ H x _) (at level 60).*)
 
-Definition app_sub (A:Type) (B:Type) (G:A->Prop) (H:A->Prop) (f: {x:A | H x} -> B) (x: {v:A | G v}) (p: forall x:A, G x -> H x): B.
+Definition app_sub2 : forall (A B A':Type), (A -> B) -> A' -> (A' <: A) -> B.
 Proof.
+  intros A B A' f x p.
   destruct x as [v Gv]. apply p in Gv as Hv.
   exact (f (exist v Hv)). 
 Defined.
 
 (* for applications to terms which are either full applications of constructors or terms destructed into unrefined terms for inductive reasoning *)
-Definition app_sub_ind (A:Type) (B:Type) (H:A->Prop) (f: {x:A | H x} -> B) (x: A) (p: H x): B.
+Definition app_sub_ind2 (A:Type) (B:Type) (H:A->Prop) (f: {x:A | H x} -> B) (x: A) (p: H x): B.
 Proof.
   exact (f (exist x p)). 
-Defined.
+Defined.*)
