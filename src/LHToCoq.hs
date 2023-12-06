@@ -194,7 +194,8 @@ translateToCoq srcConts =
       unrefinedDef = C.SpecDef unrefName coqArgs unrefRet coqDefinien
 
       defnState = definModeS `concatState` definitionModeState
-      unrefApply = LH.projectIfNeeded defnState $ refineApplyArg defnState unrefName coqArgs
+      unrefAppl = trace("calling refineApplyArg on "++unrefName++" "++unwords (map C.showArg coqArgs)) refineApplyArg defnState unrefName coqArgs
+      unrefApply = LH.projectIfNeeded defnState unrefAppl
       postRef = C.Brel C.Eq unrefApply (LH.projectIfNeeded defnState $ C.Var resId)
       refRet = let (resId, typ, _) = unrefRet in (resId, typ, postRef)
       refDefState = State [(name, coqArgs, Left refRet)] [] [] [] DefinitionMode

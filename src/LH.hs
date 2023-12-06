@@ -8,9 +8,10 @@ import Prelude
 import qualified Coq as C
 
 import qualified Data.Map as M
-import Data.Either.Combinators
 import Control.Monad.Reader
 import Data.List(findIndex,find, stripPrefix)
+import Data.Either.Combinators
+import Data.Tuple.Extra
 import Util
 import qualified Data.Bifunctor as B
 import Debug.Trace
@@ -208,7 +209,7 @@ transProof s (Term t) | mode s == DefProofMode =
   let
     tm = transLHExpr s t
     refinements = C.getRefinementsExpr (toLookupState s) "" tm -- not argument to function application, so giving "" meaning id of current definition/thm
-    expectedTyp = let (_, _, spec) = last (defSpecs s) in spec
+    expectedTyp = (thd3 . last) (defSpecs s)
     castTerm = C.castInto (toLookupState s) tm refinements $ Left expectedTyp
   in [C.Exact castTerm]
 transProof s (Term (LHVar "trivial")) = transProof s Unit

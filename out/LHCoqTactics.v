@@ -181,53 +181,39 @@ Definition inject_into_subset_type (A:Type) (x:A) (H:Prop) (p:H): {x:A | H} := (
 Definition inject_into_trivial_subset_type (A:Type) (x:A) : {v:A | True} := (exist x I).
 Notation "# x" := (exist x I) (at level 60).
 
-Inductive sub : Type -> Type -> Prop :=
+Inductive sub : Type -> Type -> Type :=
 | sub_ref : forall (T:Type) (G:T->Prop) (H:T->Prop), (forall x, G x -> H x) -> sub {x:T | G x} {x:T | H x}
 | sub_fun : forall (A1 B1 A2 B2:Type), sub A2 A1 -> sub B1 B2 -> sub (A1 -> B1) (A2 -> B2)
 (* for constructors of inductive data types which return unrefined terms*)
 | sub_triv: forall (A:Type) (H:A->Prop), (forall x, H x) -> sub A {x:A | H x}.
 Notation "A <: B" := (sub A B) (at level 40). 
 
-From Coq Require Import FunctionalExtensionality PropExtensionality.
-Lemma sub_inversion : forall (A A':Type), (A<:A') -> (exists (T:Type) (G:T->Prop) (H:T->Prop), (A = {x:T|G x} /\ A' = {x:T|H x} /\ forall (x:T), G x -> H x)) \/ (exists (A1 B1 A2 B2:Type), (A = forall _ : A1, B1) /\ (A' = forall _:A2, B2) /\ (A2 <: A1) /\ (B1 <: B2)) \/ (exists (H:A->Prop), A' = {x:A| H x} /\ (forall x:A, H x)).
+Require Import Coq.Program.Basics.
+Definition subCast : forall (A A':Type), A -> (A <: A') -> A'.
 Proof.
-  intros A A' p.
-  destruct p.
-  - left. exists T G H. auto.
-  - right. left. exists A1 B1 A2 B2. auto. 
-  - right. right. exists H. auto.
-Qed.
+  intros A A' x p. 
+  induction p.
+  - destruct x as [x Gx]. exact (exist x (h x Gx)).
+  - exact (IHp2 ∘ (x ∘ IHp1)).
+  - exact (exist x (h x)).
+Defined. 
+Notation "x ↪ A'" := (subCast _ A' x _) (at level 40). 
 
 Definition app_sub : forall (A B A':Type), (A -> B) -> A' -> (A' <: A) -> B.
 Proof.
   intros A B A' f x p.
-Admitted.
+  exact (f (subCast A' A x p)).
+Defined.
 
-Definition or_elim : forall (B:Type) (C D: Prop) (f:C -> B) (g:D->B), ((C \/ D) -> B).
-Proof.
-  intros B C D f g p.
-Admitted.
-
-Definition or_elim3 : forall (B:Type) (C D E: Prop) (f:C -> B) (g:D->B) (h:E->B) (p: C \/ D \/ E), B.
-Proof.
-  intros B C D E f g h p.
-  apply or_elim with (C:=C) (D:=D\/E). apply f. apply or_elim with (C:=D) (D:=E). apply g. apply h. apply p. 
-Qed.
-
-
-Definition subCast : forall (A A':Type), A -> (A <: A') -> A'.
-Proof.
-  intros A A' x p. 
-  assert (H: (exists (T:Type) (G:T->Prop) (H:T->Prop), (A = {x:T|G x} /\ A' = {x:T|H x} /\ forall (x:T), G x -> H x)) \/ (exists (A1 B1 A2 B2:Type), (A = forall _ : A1, B1) /\ (A' = forall _:A2, B2) /\ (A2 <: A1) /\ (B1 <: B2)) \/ (exists (H:A->Prop), A' = {x:A| H x} /\ (forall x:A, H x))).
-  { exact (sub_inversion A A' p). } clear p.
-  apply or_elim3 with (C:=(exists (T:Type) (G:T->Prop) (H:T->Prop), (A = {x:T|G x} /\ A' = {x:T|H x} /\ forall (x:T), G x -> H x))) (D:=(exists (A1 B1 A2 B2:Type), (A = forall _ : A1, B1) /\ (A' = forall _:A2, B2) /\ (A2 <: A1) /\ (B1 <: B2))) (E:=(exists (H:A->Prop), A' = {x:A| H x} /\ (forall x:A, H x))).
-  - 
-Admitted.
-  
-
-Definition subsumptionCast (A:Type) (G:A -> Prop) (H: A -> Prop) (p: forall x, G x -> H x) (x: {x: A | G x}): {y:A | H y}.
+(* Simplified version of subsequent definition
+Definition subCast1' (A:Type) (G:A -> Prop) (H: A -> Prop) (p: forall x, G x -> H x) (x: {x: A | G x}): {y:A | H y}.
 Proof.
   destruct x as [x Gx]. exact (exist x (p x Gx)). 
+Defined.*)
+
+Definition subsumptionCast (A:Type) (G:A -> Prop) (H: A -> Prop) (p: forall x, G x -> H x) (x: {x: A | G x}) : {y:A | H y}.
+Proof.
+  exact (subCast {x: A | G x} {y:A | H y} x (sub_ref A G H p)).
 Defined.
 
 Definition CoqInt := Z.

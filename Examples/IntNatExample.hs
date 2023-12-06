@@ -8,6 +8,10 @@
 {-# LANGUAGE PackageImports #-}
 module IntNatExample where
 
+{-@ embed GHC.Types.Int as Int @-}
+{-@ embed GHC.Integer.Type.Integer as Integer @-}
+{-@ embed GHC.Types.Bool as bool @-}
+
 {- HLINT ignore -}
 import Language.Haskell.Liquid.ProofCombinators
 import Prelude
