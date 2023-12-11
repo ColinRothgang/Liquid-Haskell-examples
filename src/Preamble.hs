@@ -2,16 +2,18 @@ module Preamble(lhPreamble, preamble) where
 
 import LH
 import Prelude
+import CoreToLH
 
 lhPreamble :: [SourceContent]
 lhPreamble = [natDecl] where
   -- loadTactics = LH.Import "LHCoqTactics"
-  natDecl = LH.Data "N" Nothing [("Z", []), ("Suc", [LH.TDat "N" []])]
+  [nat, zero, suc] = map CoreToLH.fixIllegalName ["N", "Z","Suc"]
+  natDecl = LH.Data nat Nothing [(zero, []), (suc, [LH.TDat nat []])]
 
 preamble :: [String]
 preamble = [load_tactics, zscope, intscope]
   where
-    load_tactics    = "Require Import LHCoqTactics.\nNotation \"` y\" := (proj1_sig y) (at level 70)." -- \nNotation \"x ↠ H p\" := (subCast _ _ H x p) (at level 60).\nNotation \"x ↠ H\" := (subCast _ _ H x _) (at level 60)." --"Require LHCoqTactics."
+    load_tactics    = "Add LoadPath \"out\" as Project. \nLoad LHCoqTactics." -- \nNotation \"x ↠ H p\" := (subCast _ _ H x p) (at level 60).\nNotation \"x ↠ H\" := (subCast _ _ H x _) (at level 60)." --"Require LHCoqTactics."
     zscope = "Open Scope Z_scope."
     intscope = "Open Scope Int_scope."
     ltacs = [ple, smtTrivial, smtApp, smtSolve]

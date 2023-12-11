@@ -20,16 +20,16 @@ import Data.Data
 -- Top level binds.
 transBind :: Data b => Show b => Bind b -> LH.Def
 transBind  (NonRec b e) =
-  LH.Def (showStripped b) `uncurry` flattenFun e
+  LH.Def (fixIllegalName $ showStripped b) `uncurry` flattenFun e
 transBind  (Rec ((b,e): _)) =
-  LH.Def (showStripped b) `uncurry` flattenFun e
+  LH.Def (fixIllegalName $ showStripped b) `uncurry` flattenFun e
 
 -- Expressions.
 trans :: Data b => Show b => Expr b -> LH.Expr
 trans (Var id)  
   | name == "()" = LH.Unit
   | otherwise = LH.Term $ LH.LHVar name
-  where name = showStripped id
+  where name = fixIllegalName $ showStripped id
                 
 trans app@App{}
   | name == "***" && qed == LH.LHVar "QED" && typ == typ2 = transEqns firstTerm lastTerm
@@ -50,7 +50,7 @@ trans app@App{}
         bop = M.lookup name bops
         
 trans l@Lam{}            = error "lambda expression not supported."
-trans (Case e b t alts)  = LH.Case (trans  e) (showStripped b) (map altToClause alts)
+trans (Case e b t alts)  = LH.Case (trans  e) (fixIllegalName $ showStripped b) (map altToClause alts)
 trans c@Cast{}           = error $ "cast expression not supported:"++toStr c
 trans (Tick tick e)      = trans e -- ignore ticks
 trans typ@(Type t)       = LH.Term $ LH.LHVar typRep where
@@ -59,7 +59,7 @@ trans c@Coercion{}       = error $ "coercion expression not supported: "++toStr 
 trans (Let bind e) = 
     case e' of
       Lit{} -> trans e  -- ignore let lit (part of patError)
-      _     -> LH.Let (show x) (trans e') (trans e)
+      _     -> LH.Let (fixIllegalName $ show x) (trans e') (trans e)
   where
     (x, e') = deconstructBind bind
 trans (Lit lit) = transLit lit
@@ -77,19 +77,19 @@ deconstructBind (NonRec b e)     = (b, e)
 
 -- case-of branches.
 altToClause :: Show b => Data b => Alt b -> (LH.Pat, LH.Expr)
-altToClause (Alt con bs e) = (LH.Pat (go con) (map showStripped bs), trans e)
+altToClause (Alt con bs e) = (LH.Pat (go con) (map (fixIllegalName . showStripped) bs), trans e)
   where go :: AltCon -> String
-        go (DataAlt dc) = showStripped dc
+        go (DataAlt dc) = fixIllegalName $ showStripped dc
         go (LitAlt lit) = show (transLit lit)
         go DEFAULT      = "_"
 
 flattenFun :: Show b => Data b => Expr b -> ([Id], LH.Expr)
-flattenFun (Lam b e) = B.first (showStripped b:) $ flattenFun e
+flattenFun (Lam b e) = B.first ((fixIllegalName . showStripped) b:) $ flattenFun e
 flattenFun e         = ([], trans e)
 
 flattenApp :: Show b => Data b => Expr b -> (Id, [LH.Expr])
 flattenApp (App f x) = (++ [trans x]) `B.second` flattenApp f
-flattenApp (Var name) = (showStripped name, [])
+flattenApp (Var name) = (fixIllegalName $ showStripped name, [])
 flattenApp t          = ("_", [trans t])-- error "cannot flatten expr."
 
 flattenQmarks :: LH.Expr -> ([LH.LHExpr], LH.Expr)
@@ -145,3 +145,13 @@ buildins = M.fromList[ ("Integer", LH.Integer)
                   , ("Bool", LH.Boolean)
                   , ("Float", LH.Double)
                   ]
+
+
+fixIllegalName :: Id -> Id
+fixIllegalName n = fromMaybe n (M.lookup n illegalNamesMap)
+
+illegalNamesMap :: M.HashMap String String
+illegalNamesMap = M.fromList [
+  ("Z", "ZeroN"),
+  ("N", "Natural")
+  ]

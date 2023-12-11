@@ -20,7 +20,7 @@ transCon (RTyCon tc pvars info)
 transCon (RTyCon tc pvars info) = LH.TDat (showppStripped tc) $ map (LH.TVar . showpp) pvars
 
 showppStripped :: PPrint a => a -> String
-showppStripped = strip . showpp
+showppStripped = (CoreToLH.fixIllegalName . strip) . showpp
 
 -- SpecType = RType RTyCon RTyVar RReft
 retType :: SpecType -> LH.LHArg

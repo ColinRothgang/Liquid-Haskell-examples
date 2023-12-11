@@ -219,6 +219,11 @@ Proof.
   exact (subCast {x: A | G x} {y:A | H y} x (sub_ref A G H p)).
 Defined.
 
+Definition injectionCast (A:Type) (H: A -> Prop) (p: forall x, H x) (x: A) : {y:A | H y}.
+Proof.
+  exact (subCast A {y:A | H y} x (sub_triv A H p)).
+Defined.
+
 Definition CoqInt := Z.
 Definition CoqFloat := float.
 

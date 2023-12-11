@@ -176,7 +176,7 @@ substituteInTerm nO f expr = case expr of
   (MatchSimple e branches) -> MatchSimple (subst e) (mapBranches branches)
   (Ite cond thenE elseE) -> Ite (trans cond) (subst thenE) (subst elseE)
   (Let n defn body) -> Let n (subst defn) (subst body)
-  (Inject typ expr prf) -> Inject (transTp typ) (subst expr) (subst prf)
+  (Inject typ expr prf) -> Inject (transTp typ) (subst expr) (subst <$> prf)
   (Project tm) -> Project (subst tm)
   (SubCast typ (n, need) (m, have) tm prfO) -> SubCast (transTp typ) (n, trans need) (m, trans have) (subst tm) (fmap subst prfO)
   (EProp p) -> EProp (trans p)
@@ -234,7 +234,7 @@ castInto s tm refinements expectedTyp =
     -- drop the accompanying base (expected) types
     expectedTypsStripped = drop (length zippedRefs - length zippedRefsStripped) expectedTyps
     (subsumptionRefs, projInjRefs) = break (\(x,y) -> isNothing x || isNothing y) zippedRefsStripped
-    inject (Just (n, ref), Nothing) typ tm = Inject (RExpr n typ ref) tm (ProofTerm (if isDefnMode s then "I" else "_"))
+    inject (Just (n, ref), Nothing) typ tm = Inject (RExpr n typ ref) tm (if isDefnMode s then Just (ProofTerm "I") else Nothing)
     injectionsRev = zipWith inject projInjRefs expectedTypsStripped
     (projections, injections) = if isNothing (fst =<< safeHead projInjRefs) then (map (const Project) projInjRefs, []) else ([], reverse injectionsRev)
     subsumptions = subsumptionCasts s (reverse $ zip (map (bimap fromJust fromJust) subsumptionRefs) (take (length subsumptionRefs) expectedTypsStripped))
@@ -306,7 +306,7 @@ instance Show Constant where
 
 newtype Load = Load {moduleName :: Id}
 instance Show Load where
-  show (Load name) = "Require " ++ name ++ ". "
+  show (Load name) = "Load " ++ name ++ ". "
 
 data NewType = NewType {typeName :: Id, defin :: Type}
 instance Show NewType where
@@ -348,7 +348,7 @@ data Expr = App Id [Expr]
           | StringLiteral String
           | IntLiteral Integer
           | FloatLiteral Float
-          | Inject Type Expr Expr
+          | Inject Type Expr (Maybe Expr)
           | Project Expr
           | SubCast Type (Id, Prop) (Id, Prop) Expr (Maybe Expr)
           | ProofTerm String
@@ -359,10 +359,10 @@ data Expr = App Id [Expr]
           | Lambda Id Type Expr deriving Data
 
 injectTrivially :: Expr -> Expr
-injectTrivially expr = Inject Hole expr $ ProofTerm "I"
+injectTrivially expr = Inject Hole expr $ Just (ProofTerm "I")
 
 injectArgument :: CoqArg -> Expr
-injectArgument (name, typ, reft) = Inject typ (Var name) $ ProofTerm "I"
+injectArgument (name, typ, reft) = Inject typ (Var name) $ Just (ProofTerm "I")
 
 subsumptionCast :: LookupState -> Type  -> (Id, Prop) -> (Id, Prop) -> Expr -> Expr
 subsumptionCast s typ need have tm = SubCast typ need have tm (if isDefnMode s then Just $ ProofTerm "I" else Nothing)
@@ -384,11 +384,16 @@ instance Show Expr where
     where
       showBranch (p, e) = "| " ++ show p ++ " => " ++ show e
   show (Ite cond thenE elseE) = "if "++ addParens (show cond) ++ " then "++addParens (show thenE)++" else "++addParens (show elseE)
-  show (Inject (RExpr n typ ref) x p) =  injectIntoSubset $ addParens (show x) -- addParens $ "inject_into_subset_type " ++ show typ ++ " " ++ show x ++ " " ++ show ref ++ " " ++ show p
+  show (Inject (RExpr n (RExpr _ typ _) ref) x p) = show (Inject (RExpr n typ ref) x p)
+  -- show (Inject refTp@(RExpr n typ TT) tm Nothing) = addParens $ unwords ("injectionCast":[show typ, addParens $ show (Lambda n typ (EProp TT)), (show . Lambda n typ) (ProofTerm "I"), addParens $ show tm])
+  show (Inject refTp@(RExpr n typ ref) tm p) =  
+    addParens $ unwords ("injectionCast":[show typ, addParens $ show (Lambda n typ (EProp ref)), maybe "_" (show . Lambda n typ) p, addParens $ show tm])
+    -- injectIntoSubset $ addParens (show x) -- addParens $ "inject_into_subset_type " ++ show typ ++ " " ++ show x ++ " " ++ show ref ++ " " ++ show p
   show (Project expr@Var{})   = addParens $ "` " ++ addParens (show expr)
   show (Project expr)   = addParens $ "` " ++ addParens (show expr)
-  show (SubCast (RExpr _ typ ref) (n,need) (m,have) tm prfO) = addParens $ unwords ("subsumptionCast":[show typ, addParens $ show (Lambda m typ (EProp have)), addParens $ show (Lambda n typ (EProp need)), maybe "_" show prfO, addParens $ show tm])
-  show (SubCast typ (n, need) (m, have) tm prfO) = addParens $ unwords ("subsumptionCast":[show typ, addParens $ show (Lambda m typ (EProp have)), addParens $ show (Lambda n typ (EProp need)), maybe "_" show prfO, addParens $ show tm]) --show tm ++ " ↠ " ++ show need
+  show (SubCast (RExpr _ typ ref) (n,need) (m,have) tm prfO) = show $ SubCast typ (n, need) (m, have) tm prfO
+  show (SubCast typ (n, need) (m, have) tm prfO) = 
+    addParens $ unwords ("subsumptionCast":[show typ, addParens $ show (Lambda m typ (EProp have)), addParens $ show (Lambda n typ (EProp need)), maybe "_" show prfO, addParens $ show tm]) --show tm ++ " ↠ " ++ show need
   show (ProofTerm prf)  = prf
   show TrivialProof = show Trivial
   show (EProp p) = show p
@@ -520,7 +525,7 @@ instance Show Tactic where
   show (Intros ns) = "intros " ++ unwords ns
   show (Revert ns) = "revert " ++ unwords ns
   show (Now t) = "now " ++ show t
-  show (Exact x) = "refine "++ addParens (show x)
+  show (Exact x) = "\n unshelve refine "++ addParens (show x)
 
 showBranches :: [[Tactic]] -> String
 showBranches = intercalate ". " . map showBranch
