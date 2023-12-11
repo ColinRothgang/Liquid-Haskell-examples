@@ -26,12 +26,18 @@ triviallyRefinedArg n typ = (n, typ, TT)
 data Theorem = Theorem {cpName :: Id, cpArgs :: [CoqArg], cpType :: Prop, cpbody :: [Tactic]}
 instance Show Theorem where
   show (Theorem name args ty bod) =
-    "Theorem " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ show ty ++ ".\n"
+    "Definition "++ name ++"_spec: Prop. \nProof. "
+    ++ show (Exact (Forall (map (\(n,t,r) -> (n,Just (RExpr n t r))) args) ty))
+    ++ ".\nDefined.\n"
+    ++ "Theorem " ++ name ++ ": " ++ name++"_spec" ++ ".\n"
     ++ "Proof.\n  "
+    ++ introsArgs args
     ++ destructArgs args
     ++ intercalate ". " (map show bod) ++ ".\n"
     ++ "Qed.\n"
     where 
+      introsArgs :: [(Id, b, c)] -> String
+      introsArgs args = intercalate "" $ map ((((flip (++) ". " . show) . Intros) . flip (:) []). fst3) args
       destructArgs args = 
         let destructs = unwords (map destructSubsetArgIfNeeded args) in
         if all isSpace destructs then "" else destructs ++ "\n  "
@@ -356,7 +362,8 @@ data Expr = App Id [Expr]
           | EProp Prop
           | Buildin BuildInTps
           | TypArg Type
-          | Lambda Id Type Expr deriving Data
+          | Lambda Id Type Expr
+          | Forall [(Id, Maybe Type)] Prop deriving Data
 
 injectTrivially :: Expr -> Expr
 injectTrivially expr = Inject Hole expr $ Just (ProofTerm "I")
@@ -403,6 +410,7 @@ instance Show Expr where
   show (IntLiteral i) = show i-- "Z_as_Int._"++ show i
   show (TypArg t) = show t
   show (Lambda n typ body) = addParens $ "fun "++n++": "++show typ++" => "++show body
+  show (Forall args body) = addParens $ "forall "++unwords (map (\(n, typ)->addParens $ n ++ maybe "" ((++) ":" . show) typ) args)++", "++show body
 
 instance Eq Expr where
   (==) x y = show x == show y
