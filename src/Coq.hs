@@ -13,6 +13,9 @@ import Data.Either.Combinators
 import Data.Align
 import Data.Tuple.Extra
 import Data.Bifunctor
+import Numeric.Natural
+import qualified Data.HashMap.Strict as M
+
 
 import Debug.Trace
 
@@ -139,7 +142,7 @@ subsumptionCasts s [((need, have), typ)] = [subsumptionCast s typ need have]
 subsumptionCasts s reqs | all (uncurry equivReqs . fst) reqsTl = [subsumptionCast s typ need have] where ((need, have), typ):reqsTl = reqs
 subsumptionCasts _ required = error ("Found more than one subsumption cast: "++show required++" This is unsupported. ")
 
-substituteInType :: Maybe Id -> (Id -> Id -> Expr) -> Type -> Type
+substituteInType :: Maybe (Id, Natural) -> ((Id, Natural) -> Id -> Expr) -> Type -> Type
 substituteInType nO f typ = case typ of
   TExpr expr -> TExpr $ subst expr
   TProp prop -> TProp $ trans prop
@@ -151,7 +154,7 @@ substituteInType nO f typ = case typ of
     trans = substituteInProp nO f
     transTp = substituteInType nO f
 
-substituteInProp :: Maybe Id -> (Id -> Id -> Expr) -> Prop -> Prop
+substituteInProp :: Maybe (Id, Natural) -> ((Id, Natural) -> Id -> Expr) -> Prop -> Prop
 substituteInProp nO f p = case p of
   Brel rel left right -> Brel rel (subst left) (subst right)
   Bop op left right -> Bop op (subst left) (subst right)
@@ -165,10 +168,10 @@ substituteInProp nO f p = case p of
     subst = substituteInTerm nO f
     trans = substituteInProp nO f
 
-substituteInTerm :: Maybe Id -> (Id -> Id -> Expr) -> Expr -> Expr
+substituteInTerm :: Maybe (Id, Natural) -> ((Id, Natural) -> Id -> Expr) -> Expr -> Expr
 substituteInTerm nO f expr = case expr of
   (Var n) -> maybe (Var n) (`f` n) nO
-  (App n xs) -> trace("substituting in application of "++rename n) App (rename n) (map (substituteInTerm (Just n) f) xs)
+  (App n xs) -> trace("substituting in application of "++rename n) App (rename n) (zipWith (\i -> substituteInTerm (Just (n,i)) f) [0..] xs)
   (Match e n branches) -> Match (subst e) n (mapBranches branches)
   (MatchSimple e branches) -> MatchSimple (subst e) (mapBranches branches)
   (Ite cond thenE elseE) -> Ite (trans cond) (subst thenE) (subst elseE)
@@ -187,17 +190,34 @@ substituteInTerm nO f expr = case expr of
     mapBranches = mapSnd subst
     rename n = case nO of Just bind -> (case f bind n of Var m -> m; _ -> n); Nothing -> n
 
--- unfortunately free variables in terms in specs of previous definitions/theorems may have different refinements in current context, requiring recasting them
-reprocessRef :: LookupState -> Prop -> Prop
-reprocessRef s ref = trans ref where
+substForAppl :: LookupState -> Expr -> M.HashMap Id Expr
+substForAppl s tm = M.fromList $ case tm of
+    App n args -> maybe [] (zipWith (\arg spec -> (fst3 spec, stripCasts arg)) args) (funcSpec n)
+    _ -> []
+    where
+      stripCasts (Project tm) = tm
+      stripCasts (Inject _ tm _) = tm
+      stripCasts (SubCast _ _ _ tm _) = tm
+      stripCasts tm = tm
+      funcSpec n = snd <$> find (\(x,_) -> x == n) (map (\(x,y,_) -> (x,y)) (specs s))
+
+transForAppl :: LookupState -> Expr -> ((Id, Natural) -> Id -> Expr)
+transForAppl s tm = const (\v -> fromMaybe (Var v) (M.lookup v (substForAppl s tm)))
+
+-- unfortunately free variables in terms in specs of previous definitions/theorems 
+-- may have different refinements in current context, requiring recasting them
+-- additionally, we need to substitute current values for dependent variables in the sepcs
+reprocessRef :: LookupState -> Maybe Expr -> Prop -> Prop
+reprocessRef s tm ref = trans ref where
   funcSpec n = snd <$> find (\(x,_) -> x == n) (map (\(x,y,_) -> (x,y)) (specs s))
   argSpecO n v = find ((== v) . fst3) =<< funcSpec n
-  f n v = case argSpecO n v of 
+  f (n,_) v = case argSpecO n v of 
     Just expCArg -> 
       let
         tmRefs = getRefinementsExpr s n (Var v)
-        castVar = castInto s (Var v) (tmRefs) (Left expCArg)
-      in trace ("Cast in reprocessRef (for ref "++ show ref++") for variable "++v++" with refs "++show tmRefs++" to type "++showArg expCArg++" yielding "++show castVar) castVar
+        tmRefsSubst = mapSnd (substituteInProp Nothing (maybe (\_ v -> Var v) (transForAppl s) tm)) tmRefs
+        castVar = castInto s (Var v) tmRefsSubst (Left expCArg)
+      in trace ("Cast in reprocessRef (for ref "++ show ref++") for variable "++v++" with refs "++show tmRefsSubst++" to type "++showArg expCArg++" yielding "++show castVar) castVar
     Nothing -> Var v
   trans = substituteInProp Nothing f
 
@@ -205,8 +225,8 @@ castInto :: LookupState -> Expr -> [(Id, Prop)] -> Either CoqArg Type -> Expr
 castInto s tm refinements expectedTyp = 
   let 
     typ = either id id $ mapLeft snd3 expectedTyp
-    expectedRefinements = either (mapSnd (reprocessRef s). getRefinementsCoqArg) (const []) expectedTyp
-    refinementsSubstRev = reverse (mapSnd (reprocessRef s) refinements)
+    expectedRefinements = either (mapSnd (reprocessRef s (Just tm)). getRefinementsCoqArg) (const []) expectedTyp
+    refinementsSubstRev = reverse (mapSnd (reprocessRef s Nothing) refinements)
     zippedRefs = padZip (reverse expectedRefinements) refinementsSubstRev
     -- drop matching innermost refinements
     zippedRefsStripped = dropWhile (uncurry (==)) zippedRefs

@@ -204,6 +204,9 @@ Proof.
   intros A B A' f x p.
   exact (f (subCast A' A x p)).
 Defined.
+Notation "f _@_ x" := (app_sub _ _ _ f x _) (at level 60).
+
+
 
 (* Simplified version of subsequent definition
 Definition subCast1' (A:Type) (G:A -> Prop) (H: A -> Prop) (p: forall x, G x -> H x) (x: {x: A | G x}): {y:A | H y}.

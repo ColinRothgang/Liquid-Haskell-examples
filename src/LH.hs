@@ -208,9 +208,12 @@ transProof :: InternalState -> Expr -> [C.Tactic]
 transProof s (Term t) | mode s == DefProofMode = 
   let
     tm = transLHExpr s t
-    refinements = C.getRefinementsExpr (toLookupState s) "" tm -- not argument to function application, so giving "" meaning id of current definition/thm
+    ls = toLookupState s
+    trans = C.transForAppl ls tm
+    transRef = mapSnd (C.substituteInProp Nothing trans)
+    refinements = transRef $ C.getRefinementsExpr ls "" tm -- not argument to function application, so giving "" meaning id of current definition/thm
     expectedTyp = (thd3 . last) (defSpecs s)
-    castTerm = C.castInto (toLookupState s) tm refinements $ Left expectedTyp
+    castTerm = C.castInto ls tm refinements $ Left expectedTyp
   in [C.Exact castTerm]
 transProof s (Term (LHVar "trivial")) = transProof s Unit
 transProof s (Term (LHApp f es)) = C.Apply (refineApply s f (map (transExpr s) es')): concatMap (transProof s) ps

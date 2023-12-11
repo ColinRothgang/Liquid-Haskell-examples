@@ -21,7 +21,7 @@ Defined.
 Definition mult_unrefined (m: { m : N | True }) (n: { n : N | True }): { VV : N | True }. 
 Proof.
   destruct m as [m mp ].  destruct n as [n np ]. 
-  induction m as [| m IHm ]. now refine (# (Z)). now refine (subsumptionCast N (fun VV: N => (` (add_unrefined (# (m)) (# (n))))=VV) (fun VV: N => True) _ (add (# (n)) IHm)).
+  induction m as [| m IHm ]. now refine (# (Z)). now refine (subsumptionCast N (fun VV: N => (` (add_unrefined (# (n)) IHm))=VV) (fun VV: N => True) _ (add (# (n)) IHm)).
 Defined.
 
 Definition mult (m: { m : N | True }) (n: { n : N | True }): { VV : N | (` (mult_unrefined m n))=VV } .
