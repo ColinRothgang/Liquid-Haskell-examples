@@ -74,7 +74,7 @@ data BuildInTps = Integer | Boolean | Double deriving Show
 data LHArg = LHArg { lhArgName :: Id, lhArgType :: Type, lhArgReft :: LHExpr} deriving Show
 data Signature = Signature {sigArgs :: [LHArg], sigRes :: LHArg} deriving Show
 
-data TranslationMode = DefinitionMode | ProofMode | DefProofMode deriving (Eq, Show)
+data TranslationMode = DefinitionMode | DefinitionSpecMode | ProofMode | DefProofMode deriving (Eq, Show)
 data InternalState = State {specs:: [(Id, [C.CoqArg], Either C.CoqArg C.Prop)], datatypeConstrs :: [Id], datatypeMeasures:: [(Id, Id)], warnings :: [String], mode :: TranslationMode} deriving Show
 defSpecs :: InternalState -> [(Id, [C.CoqArg], C.CoqArg)]
 defSpecs (State specs _ _ _ _) = mapMaybe (\(x, y, e) -> (x,y,) <$> leftToMaybe e) specs
@@ -84,7 +84,7 @@ emptyState :: InternalState
 emptyState = State [] [] [] [] DefinitionMode
 
 toLookupState :: InternalState -> C.LookupState
-toLookupState s = C.State (specs s) (datatypeConstrs s) ((== DefinitionMode) (mode s))
+toLookupState s = C.State (specs s) (datatypeConstrs s) ((\s -> s == DefinitionMode || s == DefinitionSpecMode) (mode s)) (((==) DefinitionSpecMode . mode) s)
 
 concatState :: InternalState -> InternalState -> InternalState
 concatState (State sps cs m1 w1 _) (State sps2 cs2 m2 w2 f)= State (sps ++ sps2) (cs ++ cs2) (m1 ++ m2) (w1 ++ w2) f
@@ -107,7 +107,7 @@ registerDataDefSpecs name args ret = Result (State [(name, args, Left ret)] [nam
 registerThmSpecs :: Id -> [C.CoqArg] -> C.Prop -> StateResult ()
 registerThmSpecs name args claim = Result (State [(name, args, Right claim)] [] [] [] ProofMode, ())
 
-definitionModeState = State [] [] [] [] DefinitionMode
+definitionModeState = State [] [] [] [] DefinitionSpecMode
 registerDefinitionMode = Result (definitionModeState, ())
 registerProofMode = Result (State [] [] [] [] ProofMode, ())
 registerDefProofMode = Result (State [] [] [] [] DefProofMode, ())

@@ -126,7 +126,7 @@ Local Ltac smt_rwr_with3 th arg arg2 arg3 := smt_ple_simpl_tac (rewrite <- th wi
 Tactic Notation "smt_use_rw_rwr_ap" tactic(appl_tac) tactic(rw_tac) tactic(rwr_tac) :=
   first [progress rw_tac | progress rwr_tac | appl_tac].
 
-Ltac smt_use th := first [progress simpl_rewrite th | simpl_apply th].
+Ltac smt_use th := first [progress simpl_rewrite th | smt_ple_simpl_tac (eapply th) th | simpl_apply th].
 Ltac smt_use_with th arg := smt_use_rw_rwr_ap (smt_ap_with th arg) (smt_rw_with th arg) (smt_rwr_with th arg).
 Ltac smt_use_with2 th arg arg2 := smt_use_rw_rwr_ap (smt_ap_with2 th arg arg2) (smt_rw_with2 th arg arg2) (smt_rwr_with2 th arg arg2).
 Ltac smt_use_with3 th arg arg2 arg3:= smt_use_rw_rwr_ap (smt_ap_with3 th arg arg2 arg3) (smt_rw_with3 th arg arg2 arg3) (smt_rwr_with3 th arg arg2 arg3).

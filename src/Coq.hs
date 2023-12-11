@@ -16,7 +16,6 @@ import Data.Bifunctor
 import Numeric.Natural
 import qualified Data.HashMap.Strict as M
 
-
 import Debug.Trace
 
 type CoqArg = (Id, Type, Prop)
@@ -27,7 +26,7 @@ data Theorem = Theorem {cpName :: Id, cpArgs :: [CoqArg], cpType :: Prop, cpbody
 instance Show Theorem where
   show (Theorem name args ty bod) =
     "Definition "++ name ++"_spec: Prop. \nProof. "
-    ++ show (Exact (Forall (map (\(n,t,r) -> (n,Just (RExpr n t r))) args) ty))
+    ++ "now "++dropWhile isSpace (show (Exact (Forall (map (\(n,t,r) -> (n,Just (RExpr n t r))) args) ty)))
     ++ ".\nDefined.\n"
     ++ "Theorem " ++ name ++ ": " ++ name++"_spec" ++ ".\n"
     ++ "Proof.\n  "
@@ -74,12 +73,12 @@ printTrivial = True
 printRef :: Prop-> Bool
 printRef p = printTrivial || not (isTrivial p) 
 
-data LookupState = State {specs :: [(Id, [CoqArg], Either CoqArg Prop)], datatypeConstrs :: [Id], isDefnMode:: Bool}
+data LookupState = State {specs :: [(Id, [CoqArg], Either CoqArg Prop)], datatypeConstrs :: [Id], isDefnMode:: Bool, isDefnSpecMode:: Bool}
 defSpecs :: LookupState -> [(Id, [CoqArg], CoqArg)]
 defSpecs s = mapMaybe (\(x, y, e) -> (x,y,) <$> leftToMaybe e) $ specs s
 
 fromSpecs :: [(Id, [CoqArg], Either CoqArg Prop)] -> LookupState
-fromSpecs specs = State specs [] False
+fromSpecs specs = State specs [] False False
 
 getRefinementsLastSpec :: LookupState -> [(Id, Prop)]
 getRefinementsLastSpec s = maybe [] getRefinementsCoqArg (leftToMaybe r) where
@@ -240,7 +239,7 @@ castInto s tm refinements expectedTyp =
     -- drop the accompanying base (expected) types
     expectedTypsStripped = drop (length zippedRefs - length zippedRefsStripped) expectedTyps
     (subsumptionRefs, projInjRefs) = break (\(x,y) -> isNothing x || isNothing y) zippedRefsStripped
-    inject (Just (n, ref), Nothing) typ tm = Inject (RExpr n typ ref) tm (if isDefnMode s then Just (ProofTerm "I") else Nothing)
+    inject (Just (n, ref), Nothing) typ tm = Inject (RExpr n typ ref) tm (if isDefnSpecMode s && ref == TT then Just (ProofTerm "I") else Nothing)
     injectionsRev = zipWith inject projInjRefs expectedTypsStripped
     (projections, injections) = if isNothing (fst =<< safeHead projInjRefs) then (map (const Project) projInjRefs, []) else ([], reverse injectionsRev)
     subsumptions = subsumptionCasts s (reverse $ zip (map (bimap fromJust fromJust) subsumptionRefs) (take (length subsumptionRefs) expectedTypsStripped))
@@ -369,10 +368,10 @@ injectTrivially :: Expr -> Expr
 injectTrivially expr = Inject Hole expr $ Just (ProofTerm "I")
 
 injectArgument :: CoqArg -> Expr
-injectArgument (name, typ, reft) = Inject typ (Var name) $ Just (ProofTerm "I")
+injectArgument (name, typ, reft) = Inject typ (Var name) Nothing
 
 subsumptionCast :: LookupState -> Type  -> (Id, Prop) -> (Id, Prop) -> Expr -> Expr
-subsumptionCast s typ need have tm = SubCast typ need have tm (if isDefnMode s then Just $ ProofTerm "I" else Nothing)
+subsumptionCast s typ need@(_, needRef) have tm = SubCast typ need have tm (if isDefnSpecMode s && isTrivial needRef then Just $ ProofTerm "I" else Nothing)
 
 instance Show Expr where
   show (Sym s)        = s
@@ -392,10 +391,10 @@ instance Show Expr where
       showBranch (p, e) = "| " ++ show p ++ " => " ++ show e
   show (Ite cond thenE elseE) = "if "++ addParens (show cond) ++ " then "++addParens (show thenE)++" else "++addParens (show elseE)
   show (Inject (RExpr n (RExpr _ typ _) ref) x p) = show (Inject (RExpr n typ ref) x p)
-  -- show (Inject refTp@(RExpr n typ TT) tm Nothing) = addParens $ unwords ("injectionCast":[show typ, addParens $ show (Lambda n typ (EProp TT)), (show . Lambda n typ) (ProofTerm "I"), addParens $ show tm])
+  show (Inject refTp@(RExpr n typ TT) tm Nothing) = show (Inject refTp tm (Just $ ProofTerm "I")) -- ++". try "++show (Exact (Lambda n typ (ProofTerm "I")))
+  -- show (Inject refTp@(RExpr n typ TT) tm Nothing) = injectIntoSubset $ addParens (show tm) -- addParens $ unwords ("injectionCast":[show typ, addParens $ show (Lambda n typ (EProp TT)), (show . Lambda n typ) (ProofTerm "I"), addParens $ show tm])
   show (Inject refTp@(RExpr n typ ref) tm p) =  
     addParens $ unwords ("injectionCast":[show typ, addParens $ show (Lambda n typ (EProp ref)), maybe "_" (show . Lambda n typ) p, addParens $ show tm])
-    -- injectIntoSubset $ addParens (show x) -- addParens $ "inject_into_subset_type " ++ show typ ++ " " ++ show x ++ " " ++ show ref ++ " " ++ show p
   show (Project expr@Var{})   = addParens $ "` " ++ addParens (show expr)
   show (Project expr)   = addParens $ "` " ++ addParens (show expr)
   show (SubCast (RExpr _ typ ref) (n,need) (m,have) tm prfO) = show $ SubCast typ (n, need) (m, have) tm prfO
