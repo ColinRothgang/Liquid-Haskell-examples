@@ -75,6 +75,7 @@ Require Import SMTCoq.SMTCoq.
 Require Import Bool.
 
 Require Import ZArith.
+Require Export Psatz.
 
 
 Import BVList.BITVECTOR_LIST.
@@ -88,8 +89,8 @@ Local Ltac intros_ple :=
   let H' := fresh "H" in
   split_ple; intros H'; try injectivity_in H'; simpl in H'.
 
-Ltac smt_trivial := simpl; first [ assumption | intuition discriminate | easy | ple | split_ple ].
-
+Ltac smt_trivial := simpl; first [ assumption | intuition discriminate | easy | ple | split_ple | now lia ].
+Tactic Notation "smt_now" tactic(t) := t; smt_trivial.
 
 Tactic Notation "smt_ple_tac" tactic(tac) :=
   first [ tac | ple; tac | split_ple; tac (* | intros_ple; tac*) ].

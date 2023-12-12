@@ -26,7 +26,7 @@ data Theorem = Theorem {cpName :: Id, cpArgs :: [CoqArg], cpType :: Prop, cpbody
 instance Show Theorem where
   show (Theorem name args ty bod) =
     "Definition "++ name ++"_spec: Prop. \nProof. "
-    ++ "now "++dropWhile isSpace (show (Exact (Forall (map (\(n,t,r) -> (n,Just (RExpr n t r))) args) ty)))
+    ++ "smt_now "++dropWhile isSpace (show (Exact (Forall (map (\(n,t,r) -> (n,Just (RExpr n t r))) args) ty)))
     ++ ".\nDefined.\n"
     ++ "Theorem " ++ name ++ ": " ++ name++"_spec" ++ ".\n"
     ++ "Proof.\n  "
@@ -542,7 +542,7 @@ instance Show Tactic where
   show (LetTac n t1 t2) = "let " ++ filterWeird n ++ " := " ++ addParens (showNoDot t1) ++ " in " ++ show t2
   show (Intros ns) = "intros " ++ unwords ns++". "
   show (Revert ns) = "revert " ++ unwords ns++". "
-  show (Now t) = "now " ++ show t -- for better debugging: show t++show (Try Trivial)
+  show (Now t) = "smt_now " ++ show t -- for better debugging: show t++show (Try Trivial)
   show (Exact x) = "unshelve refine "++ addParens (show x)++". "
   show (Subgoal tacs) = "\n    { "++intercalate "" (map show tacs)++"}"
 
