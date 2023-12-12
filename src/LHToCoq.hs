@@ -194,11 +194,11 @@ translateToCoq srcConts =
       unrefinedDef = C.SpecDef unrefName coqArgs unrefRet coqDefinien
 
       defnState = definModeS `concatState` definitionModeState
-      unrefAppl = trace("calling refineApplyArg on "++unrefName++" "++unwords (map C.showArg coqArgs)) refineApplyArg defnState unrefName coqArgs
+      unrefAppl = refineApplyArg defnState unrefName coqArgs
       unrefApply = LH.projectIfNeeded defnState unrefAppl
       postRef = C.Brel C.Eq unrefApply (LH.projectIfNeeded defnState $ C.Var resId)
       refRet = let (resId, typ, _) = unrefRet in (resId, typ, postRef)
-      refDefState = State [(name, coqArgs, Left refRet)] [] [] [] DefinitionMode
+      refDefState = State [(name, coqArgs, Left refRet)] [] [] [] DefinitionSpecMode
       refinedDef = C.RefDef name coqArgs refRet (C.fromSpecs [(unrefName, coqArgs, Left unrefRet), (name, coqArgs, Left refRet)])
     in Result (unrefDefState `concatState`  refDefState, map C.DefinitionDeclaration [unrefinedDef, refinedDef])
   translate (Result (s,Theorem name args lhClaim body)) = 
@@ -211,4 +211,4 @@ translateToCoq srcConts =
       proofModeS = s `concatState` prfState
       tacs = transformTop proofModeS (Def name argNames body)
       thm = C.Theorem name coqArgs claim tacs
-    in Result (prfState, [C.TheoremDeclaration thm])
+    in Result (prfState `concatState` definitionModeState, [C.TheoremDeclaration thm])

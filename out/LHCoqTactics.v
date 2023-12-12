@@ -88,7 +88,7 @@ Local Ltac intros_ple :=
   let H' := fresh "H" in
   split_ple; intros H'; try injectivity_in H'; simpl in H'.
 
-Ltac smt_trivial := simpl; first [ assumption | intuition discriminate | easy ].
+Ltac smt_trivial := simpl; first [ assumption | intuition discriminate | easy | ple | split_ple ].
 
 
 Tactic Notation "smt_ple_tac" tactic(tac) :=
@@ -172,10 +172,11 @@ Ltac smt_app_ih IH :=
   | [ |- _ ] => smt_app IH
   end.*)
 
-Ltac smt_done := if_not_done (try ple); if_not_done (try smt_trivial); if_not_done (try snipe).
+Ltac smt_done := try first [ple | eauto | split_ple | smt_trivial ]. (*if_not_done (try ple); if_not_done (try smt_trivial); if_not_done (try snipe).*)
 
+(*
 (* equality on subset types with proof irrelevance *)
-Notation "x `= y" := (@eq _ (` x) (` y)) (at level 70).
+Notation "x `= y" := (@eq _ (` x) (` y)) (at level 70).*)
 
 Definition inject_into_subset_type (A:Type) (x:A) (H:Prop) (p:H): {x:A | H} := (exist x p).
 Definition inject_into_trivial_subset_type (A:Type) (x:A) : {v:A | True} := (exist x I).
@@ -219,9 +220,25 @@ Proof.
   exact (subCast {x: A | G x} {y:A | H y} x (sub_ref A G H p)).
 Defined.
 
-Definition injectionCast (A:Type) (H: A -> Prop) (p: forall x, H x) (x: A) : {y:A | H y}.
+Definition injectionCast (A:Type) (H: A -> Prop) (x: A) (p: H x) : {y:A | H y}.
 Proof.
-  exact (subCast A {y:A | H y} x (sub_triv A H p)).
+  assert (eqRes: x = x); [exact eq_refl|].
+  assert (Hsubs: forall y:A, y = x -> H y); [smt_trivial|].
+  exact (subCast {y:A| y = x} {y:A | H y} (exist x eqRes) (sub_ref A (fun y:A => y = x) H Hsubs)).
+Defined.
+
+
+Definition injectionCast' (A:Type) (H: A -> Prop) (x: A) (p: H x) : {y:A | y = x /\ H y}.
+Proof.
+  assert (eqRes: x = x); [exact eq_refl|].
+  assert (Hsubs: forall y:A, y = x -> y = x /\ H y); [smt_trivial|].
+  exact (subCast {y:A| y = x} {y:A | y = x /\ H y} (exist x eqRes) (sub_ref A (fun y:A => y = x) (fun y:A => y = x /\ H y) Hsubs)).
+Defined.
+
+
+Definition injectionCast'' (A:Type) (H: A -> Prop) (x: A) (p: H x) : {y:A | H y}.
+Proof.
+  exact (exist x p).
 Defined.
 
 Definition CoqInt := Z.

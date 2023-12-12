@@ -21,13 +21,11 @@ import Language.Haskell.Liquid.ProofCombinators
 {- {-@ data N [toInt] = Z | Suc N @-} -}
 data N = Z | Suc N deriving Eq
 
-{-
-{-@ measure toInt @-}
+-- {-@ measure toInt @-}
 {-@ toInt :: n:N -> {v:Int | v >= 0} @-}
 toInt :: N -> Int
 toInt Z = 0
 toInt (Suc n) = 1 + toInt n
--}
 
 -- | Addition of natural numbers
 {-@ reflect add @-}

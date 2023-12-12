@@ -267,7 +267,7 @@ transBuildin Integer = C.Integer
 transBuildin Boolean = C.Boolean
 transBuildin Double = C.Double
 
-transOp :: InternalState -> Bop -> LHExpr -> LHExpr -> C.Prop
+transOp :: InternalState -> Bop -> LHExpr -> LHExpr -> C.Expr
 transOp s bop t u =
   let
     [coqT, coqU] = map (transLHExpr s) [t, u]
@@ -281,7 +281,7 @@ transLHExpr s (LHVar x)     = C.Var x
 transLHExpr _ (LHSym s)     = C.Sym s
 transLHExpr s (Evaluate t)  = transExpr s t
 transLHExpr s (Brel rel t u)= C.EProp $ transRel s rel t u
-transLHExpr s (Bop bop t u) = C.EProp $ transOp s bop t u
+transLHExpr s (Bop bop t u) = transOp s bop t u
 transLHExpr _ (LHIntLit i)  = C.IntLiteral i
 transLHExpr _ (LHStringLit s)= C.StringLiteral s
 transLHExpr _ (LHFloatLit f)= C.FloatLiteral f
@@ -440,7 +440,7 @@ transIndDef s (Def name args (Case (Term (LHVar ind)) _ [(_,e1), (_,e2)])) (pos,
 transIndDef _ def _ = error $ "unhandled proof case of " ++ show def
 
 transBranch :: InternalState -> Expr -> [C.Tactic]
-transBranch s = updateLast C.toSolve . transProof s
+transBranch s e = [C.Subgoal (updateLast C.toSolve (transProof s e))]
 
 
 -- intermediate representation of LH source

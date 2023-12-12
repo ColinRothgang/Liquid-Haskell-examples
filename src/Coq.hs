@@ -32,11 +32,11 @@ instance Show Theorem where
     ++ "Proof.\n  "
     ++ introsArgs args
     ++ destructArgs args
-    ++ intercalate ". " (map show bod) ++ ".\n"
+    ++ intercalate "" (map show bod) ++ "\n"
     ++ "Qed.\n"
     where 
       introsArgs :: [(Id, b, c)] -> String
-      introsArgs args = intercalate "" $ map ((((flip (++) ". " . show) . Intros) . flip (:) []). fst3) args
+      introsArgs args = intercalate "" $ map (((show . Intros) . flip (:) []). fst3) args
       destructArgs args = 
         let destructs = unwords (map destructSubsetArgIfNeeded args) in
         if all isSpace destructs then "" else destructs ++ "\n  "
@@ -84,8 +84,13 @@ getRefinementsLastSpec :: LookupState -> [(Id, Prop)]
 getRefinementsLastSpec s = maybe [] getRefinementsCoqArg (leftToMaybe r) where
     (_, _, r) = last (specs s)
 
--- TODO: improve treatment of nested Subset types and induction hypothesis
 getRefinementsExpr :: LookupState -> Id -> Expr -> [(Id, Prop)]
+getRefinementsExpr _ _ (StringLiteral _) = []
+getRefinementsExpr _ _ (IntLiteral _) = []
+getRefinementsExpr _ _ (FloatLiteral _) = []
+getRefinementsExpr _ _ (Sym _) = []
+getRefinementsExpr _ _ (Bop _ _ _) = []
+getRefinementsExpr _ _ (EProp (Brel _ _ _)) = []
 getRefinementsExpr s n (Inject (RExpr _ _ prop) x _) | not (printRef prop) = getRefinementsExpr s n x
 getRefinementsExpr s n (Project (Inject typ x prf)) = getRefinementsExpr s n x
 getRefinementsExpr s n (Project tm) = tail $ getRefinementsExpr s n tm
@@ -117,7 +122,7 @@ getRefinementsExpr s n e = case e of
   Ite _ expr _ -> getRefinementsExpr s n expr
   MatchSimple _ patExprs -> getRefinementsExpr s n $ (snd . head) patExprs
   Match _ _ patExprs -> getRefinementsExpr s n $ (snd . head) patExprs
-  _ -> [("_", TT) | printTrivial] -- error ("Cannot determine if "++show e++" is a subset term. ")
+  _ -> trace ("Term "++show e++" is assumed (by default) to have a single trivial refinement.") [("_", TT) | printTrivial] -- error ("Cannot determine if "++show e++" is a subset term. ")
 
 getRefinementsCoqArg :: CoqArg -> [(Id, Prop)]
 getRefinementsCoqArg (_, typ, ref) | not $ printRef ref = getRefinements typ
@@ -134,7 +139,9 @@ getRefinements (RExpr n typ ref) = (n, ref):getRefinements typ
 getRefinements _ = []
 
 projectIfNeededGeneric :: LookupState -> Expr -> Expr
-projectIfNeededGeneric s tm = foldr (\_ x -> Project x) tm (getRefinementsExpr s "" tm)
+projectIfNeededGeneric s tm = let
+    refs = getRefinementsExpr s "" tm
+  in foldr (\_ x -> Project x) tm (getRefinementsExpr s "" tm)
 
 equivReqs :: (Id, Prop) -> (Id, Prop) -> Bool
 equivReqs need have = snd need == snd have 
@@ -162,7 +169,6 @@ substituteInType nO f typ = case typ of
 substituteInProp :: Maybe (Id, Natural) -> ((Id, Natural) -> Id -> Expr) -> Prop -> Prop
 substituteInProp nO f p = case p of
   Brel rel left right -> Brel rel (subst left) (subst right)
-  Bop op left right -> Bop op (subst left) (subst right)
   And conjs -> And (map trans conjs)
   Or disjs -> Or (map trans disjs)
   Impl ante concl -> Impl (trans ante) (trans concl)
@@ -177,6 +183,7 @@ substituteInTerm :: Maybe (Id, Natural) -> ((Id, Natural) -> Id -> Expr) -> Expr
 substituteInTerm nO f expr = case expr of
   (Var n) -> maybe (Var n) (`f` n) nO
   (App n xs) -> trace("substituting in application of "++rename n) App (rename n) (zipWith (\i -> substituteInTerm (Just (n,i)) f) [0..] xs)
+  (Bop op left right) -> Bop op (subst left) (subst right)
   (Match e n branches) -> Match (subst e) n (mapBranches branches)
   (MatchSimple e branches) -> MatchSimple (subst e) (mapBranches branches)
   (Ite cond thenE elseE) -> Ite (trans cond) (subst thenE) (subst elseE)
@@ -281,7 +288,7 @@ instance Show Def where
   show (SpecDef name args retft tacs) = 
     "Definition " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArgUnnamed retft ++ ". \n"++ "Proof.\n  "
     ++ destructArgs args
-    ++ intercalate ". " (map show tacs) ++ ".\n"
+    ++ intercalate "" (map show tacs) ++ "\n"
     ++ "Defined.\n"
     where 
       destructArgs args = 
@@ -344,6 +351,7 @@ instance Show Pat where
   show (Pat c args) = c ++ " " ++ unwords (map filterWeird args)
 
 data Expr = App Id [Expr]
+          | Bop Bop Expr Expr
           | Var Id
           | Match Expr Id [(Pat, Expr)]
           | MatchSimple Expr [(Pat, Expr)]
@@ -377,6 +385,7 @@ instance Show Expr where
   show (Sym s)        = s
   show (App f [])     = filterWeird f
   show (App f es)     = f ++ " " ++ unwords (map showAppArg es)
+  show (Bop bop e1 e2)    = show e1 ++ show bop ++ show e2
   show (Var v)       = filterWeird v
   show (Let n b e)   = "let " ++ filterWeird n ++ " := " ++ show b ++ " in " ++ show e
   show (Match e n branches) =
@@ -391,10 +400,10 @@ instance Show Expr where
       showBranch (p, e) = "| " ++ show p ++ " => " ++ show e
   show (Ite cond thenE elseE) = "if "++ addParens (show cond) ++ " then "++addParens (show thenE)++" else "++addParens (show elseE)
   show (Inject (RExpr n (RExpr _ typ _) ref) x p) = show (Inject (RExpr n typ ref) x p)
-  show (Inject refTp@(RExpr n typ TT) tm Nothing) = show (Inject refTp tm (Just $ ProofTerm "I")) -- ++". try "++show (Exact (Lambda n typ (ProofTerm "I")))
+  -- show (Inject refTp@(RExpr n typ TT) tm Nothing) = show (Inject refTp tm (Just $ ProofTerm "I")) -- ++". try "++show (Exact (Lambda n typ (ProofTerm "I")))
   -- show (Inject refTp@(RExpr n typ TT) tm Nothing) = injectIntoSubset $ addParens (show tm) -- addParens $ unwords ("injectionCast":[show typ, addParens $ show (Lambda n typ (EProp TT)), (show . Lambda n typ) (ProofTerm "I"), addParens $ show tm])
   show (Inject refTp@(RExpr n typ ref) tm p) =  
-    addParens $ unwords ("injectionCast":[show typ, addParens $ show (Lambda n typ (EProp ref)), maybe "_" (show . Lambda n typ) p, addParens $ show tm])
+    addParens $ unwords ("injectionCast":[show typ, addParens $ show (Lambda n typ (EProp ref)), addParens $ show tm, maybe "_" show p])
   show (Project expr@Var{})   = addParens $ "` " ++ addParens (show expr)
   show (Project expr)   = addParens $ "` " ++ addParens (show expr)
   show (SubCast (RExpr _ typ ref) (n,need) (m,have) tm prfO) = show $ SubCast typ (n, need) (m, have) tm prfO
@@ -436,7 +445,6 @@ instance Show Type where
 
 data Prop = PExpr Expr
           | Brel Brel Expr Expr
-          | Bop Bop Expr Expr
           | And [Prop]
           | Or [Prop]
           | Impl Prop Prop
@@ -447,7 +455,6 @@ data Prop = PExpr Expr
 instance Show Prop where
   show (PExpr e) = show e
   show (Brel rel e1 e2)   = show e1 ++ show rel ++ show e2
-  show (Bop bop e1 e2)    = show e1 ++ show bop ++ show e2
   show (And ps)           = intercalate " /\\ " $ map show ps
   show (Or ps)            = intercalate " \\/ " $ map show ps
   show (Impl ante concl)  = show ante ++ "->" ++ show concl
@@ -489,6 +496,7 @@ solve = apply
 
 data Tactic = Trivial
             | Ple
+            | Try Tactic
             | Apply Expr
             | Destruct {destrExpr :: Expr, destrBinds :: [[Id]], destrBranches :: [[Tactic]]}
             | Induction {indArg :: Id, indVar :: Id, indHyp :: Id, introPat:: [Id], indBranches :: [[Tactic]]}
@@ -498,6 +506,8 @@ data Tactic = Trivial
             | Revert [Id]
             | Now Tactic
             | Solve Expr
+            -- only for more nicely structured output
+            | Subgoal [Tactic]
             | Exact Expr deriving Data
 
 simplInduction arg var hyp = Induction arg var hyp [var, hyp]
@@ -510,12 +520,13 @@ toSolve i@Induction{} = i{indBranches  = map (updateLast toSolve) (destrBranches
 toSolve t = Now t
 
 instance Show Tactic where
-  show Trivial = trivial
-  show Ple = ple
-  show (Apply TrivialProof) = show TrivialProof
-  show (Apply e) = apply ++ " " ++ showAppArg e
-  show (Solve TrivialProof) = show TrivialProof
-  show (Solve e) = solve ++ " " ++ showAppArg e
+  show Trivial = "smt_trivial"++". "
+  show Ple = ple++". "
+  show (Try t) = "try "++show t 
+  show (Apply TrivialProof) = show TrivialProof++". "
+  show (Apply e) = apply ++ " " ++ showAppArg e++". "
+  show (Solve TrivialProof) = show TrivialProof++". "
+  show (Solve e) = solve ++ " " ++ showAppArg e++". "
   -- TODO generalize destruct
   show (Destruct (Var n) binds branches) =
       "destruct " ++ n ++ " as [" ++ intercalate " | " (map unwords binds) ++ " ]. "
@@ -526,17 +537,21 @@ instance Show Tactic where
   show (Induction arg var hyp introPats branches) =
       "induction " ++ arg ++ " as [| " ++ unwords introPats ++ " ]. "
       ++ showBranches branches
-  show (Assert hypName claim prf) = "\n  assertFresh " ++ addParens (show claim) ++ " as "++ hypName ++ " using "  ++ proof where
+  show (Assert hypName claim prf) = "\n  assertFresh " ++ addParens (show claim) ++ " as "++ hypName ++ " using "  ++ proof++". " where
     proof = if not (null prf) then addParens (intercalate "; " (map show prf)) else show Trivial
-  show (LetTac n t1 t2) = "let " ++ filterWeird n ++ " := " ++ addParens (show t1) ++ " in " ++ show t2
-  show (Intros ns) = "intros " ++ unwords ns
-  show (Revert ns) = "revert " ++ unwords ns
-  show (Now t) = "now " ++ show t
-  show (Exact x) = "\n unshelve refine "++ addParens (show x)
+  show (LetTac n t1 t2) = "let " ++ filterWeird n ++ " := " ++ addParens (showNoDot t1) ++ " in " ++ show t2
+  show (Intros ns) = "intros " ++ unwords ns++". "
+  show (Revert ns) = "revert " ++ unwords ns++". "
+  show (Now t) = "now " ++ show t -- for better debugging: show t++show (Try Trivial)
+  show (Exact x) = "unshelve refine "++ addParens (show x)++". "
+  show (Subgoal tacs) = "\n    { "++intercalate "" (map show tacs)++"}"
+
+showNoDot :: Tactic -> String
+showNoDot t = (init . init) (show t)
 
 showBranches :: [[Tactic]] -> String
-showBranches = intercalate ". " . map showBranch
-  where showBranch   = intercalate ". " . map show
+showBranches = intercalate "" . map showBranch
+  where showBranch   = intercalate "" . map show
 
 filterWeird :: String -> String
 filterWeird = filter (not . flip elem "$#")
