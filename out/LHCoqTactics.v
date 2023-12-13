@@ -183,18 +183,29 @@ Definition inject_into_subset_type (A:Type) (x:A) (H:Prop) (p:H): {x:A | H} := (
 Definition inject_into_trivial_subset_type (A:Type) (x:A) : {v:A | True} := (exist x I).
 Notation "# x" := (exist x I) (at level 60).
 
+(* Create HintDb sub_hints.*)
+
 Inductive sub : Type -> Type -> Type :=
+| sub_refl : forall A: Type, sub A A
 | sub_ref : forall (T:Type) (G:T->Prop) (H:T->Prop), (forall x, G x -> H x) -> sub {x:T | G x} {x:T | H x}
 | sub_fun : forall (A1 B1 A2 B2:Type), sub A2 A1 -> sub B1 B2 -> sub (A1 -> B1) (A2 -> B2)
 (* for constructors of inductive data types which return unrefined terms*)
 | sub_triv: forall (A:Type) (H:A->Prop), (forall x, H x) -> sub A {x:A | H x}.
 Notation "A <: B" := (sub A B) (at level 40). 
+#[global] Hint Resolve sub_refl (*: sub_hints*). 
+
+(* potentially useful, but is this even sound in Coq ? *)
+(*
+Axiom subset_witness_irrelevance: forall (A:Type) (H:A->Prop) (x y: {v:A | H v}), (` x = ` y) -> (x = y).
+#[global] Hint Resolve subset_witness_irrelevance (*: sub_hints*). 
+*)
 
 Require Import Coq.Program.Basics.
 Definition subCast : forall (A A':Type), A -> (A <: A') -> A'.
 Proof.
   intros A A' x p. 
   induction p.
+  - exact x.
   - destruct x as [x Gx]. exact (exist x (h x Gx)).
   - exact (IHp2 ∘ (x ∘ IHp1)).
   - exact (exist x (h x)).

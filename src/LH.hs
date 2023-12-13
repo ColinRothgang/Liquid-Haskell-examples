@@ -313,8 +313,8 @@ transProp s (LHNeg form)          = C.Neg $ transProp s form
 transProp s (And es)              = C.And $ map (transProp s) es
 transProp s (Or es)              = C.Or $ map (transProp s) es
 transProp s (LHIte c e e2)        = C.PExpr (C.Ite (transProp s c) (transLHExpr s e) (transLHExpr s e2))
-transProp s (LHApp f es)          = C.PExpr $ refineApply s f $ map (transLHExpr s) es
-transProp s (LHVar x)             = C.PExpr $ C.Var x
+transProp s (LHApp f es)          = C.PExpr $ projectIfNeeded s (refineApply s f (map (transLHExpr s) es))
+transProp s (LHVar x)             = C.PExpr $ projectIfNeeded s (C.Var x)
 transProp s (LHImpl ante concl)   = C.Impl (transProp s ante) $ transProp s concl
 transProp s LHTrue                = C.TT
 

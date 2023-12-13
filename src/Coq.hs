@@ -75,6 +75,7 @@ isTrivial :: Prop -> Bool
 isTrivial = (==) TT
 
 printTrivial = True
+useAppSub = False
 
 printRef :: Prop-> Bool
 printRef p = printTrivial || not (isTrivial p) 
@@ -95,6 +96,8 @@ getRefinementsExpr _ _ (StringLiteral _) = []
 getRefinementsExpr _ _ (IntLiteral _) = []
 getRefinementsExpr _ _ (FloatLiteral _) = []
 getRefinementsExpr _ _ (Sym _) = []
+getRefinementsExpr s n (Bop AppSub (Bop AppSub f _) x) = getRefinementsExpr s n (Bop AppSub f x)
+getRefinementsExpr s n (Bop AppSub (Var f) _) = getRefinementsExpr s n (App f [])
 getRefinementsExpr _ _ (Bop{}) = []
 getRefinementsExpr _ _ (EProp (Brel{})) = []
 getRefinementsExpr _ _ (EProp (And{})) = []
@@ -108,8 +111,8 @@ getRefinementsExpr s n (Inject (RExpr v _ prop) tm _) = (v, prop):getRefinements
 -- constructors of data types return (unrefined) elements of that data type
 getRefinementsExpr s _ exp@(App n _) | n `elem` datatypeConstrs s = []
 -- induction hypotheses are refined if their function's/theorem's return type is
-getRefinementsExpr s _ exp@(App n@('I':'H':_) exprs) = getRefinementsLastSpec s
-getRefinementsExpr s _ exp@(App n exprs) | isJust (find ((== n) . fst3) $ defSpecs s) = 
+getRefinementsExpr s _ exp@(App n@('I':'H':_) _) = getRefinementsLastSpec s
+getRefinementsExpr s _ exp@(App n _) | isJust (find ((== n) . fst3) $ defSpecs s) = 
   let
     funSpec = fromJust $ find ((== n) . fst3) (defSpecs s)
     (_, _, coqArg) = funSpec
@@ -264,14 +267,16 @@ castInto s tm refinements expectedTyp =
   in foldr (\f x -> f x) tm castOperators
 
 refineApplyGeneric :: Show a => LookupState -> (a -> Expr) -> (LookupState -> Id -> a -> [(Id, Prop)]) -> Id -> [a] -> Expr
-refineApplyGeneric s transTm getRefs n args = {- trace ("Calling refineApplyGeneric with specs "++ show allSpecs ++ " on: " ++ show (App n (map transTm args))) $ -} App n (zipWith cast args [0..]) where
+refineApplyGeneric s transTm getRefs f args = {- trace ("Calling refineApplyGeneric with specs "++ show allSpecs ++ " on: " ++ show (App f (map transTm args))) $ -} 
+  if useAppSub && not (isDefnMode s) then applySubs f (map transTm args) else App f (zipWith cast args [0..])
+  where
   allSpecs = specs s
   lookupArgTyp :: Maybe [CoqArg]
-  lookupArgTyp = snd3 <$> find ((== n) . fst3) (specs s)
+  lookupArgTyp = snd3 <$> find ((== f) . fst3) (specs s)
 
   hasSpec i = case lookupArgTyp of 
     Just argTps -> 
-      (length argTps >= i + 1) || error ("looked up specification of function " ++ n ++ " has only "++ show (length argTps) ++" arguments but is applied to at least "++ show (i + 1) ++ " arguments. ")
+      (length argTps >= i + 1) || error ("looked up specification of function " ++ f ++ " has only "++ show (length argTps) ++" arguments but is applied to at least "++ show (i + 1) ++ " arguments. ")
     _ -> False
 
   cast t i | hasSpec i =
@@ -280,14 +285,14 @@ refineApplyGeneric s transTm getRefs n args = {- trace ("Calling refineApplyGene
       tm = transTm t
       expectedSpec = funSpec!!i
       (_, typ, ref) = expectedSpec
-      dataArg = n `elem` datatypeConstrs s
-      dataArgTyp = (either snd3 (error "Found proposition as return type of data constructor.")  . thd3 <$> find ((== n) . fst3) (specs s))
-      dataRes = Just typ == (either snd3 (error "Found proposition as return type of data constructor.")  . thd3 <$> find ((== n) . fst3) (specs s))
+      dataArg = f `elem` datatypeConstrs s
+      dataArgTyp = (either snd3 (error "Found proposition as return type of data constructor.")  . thd3 <$> find ((== f) . fst3) (specs s))
+      dataRes = Just typ == (either snd3 (error "Found proposition as return type of data constructor.")  . thd3 <$> find ((== f) . fst3) (specs s))
       triviallyRefined = isTrivial ref
       expected = if dataArg && dataRes && isTrivial ref then Right typ else Left expectedSpec
     in
     castInto s tm (getRefs s (fst3 $ last allSpecs) t) expected
-  cast t i | not (hasSpec i) = transTm t -- error $ "No specs found for "++n++" found specs: \n"++show allSpecs -- if getRefs allSpecs n t then Project (transTm t) else transTm t
+  cast t i | not (hasSpec i) = transTm t -- error $ "No specs found for "++f++" found specs: \n"++show allSpecs -- if getRefs allSpecs f t then Project (transTm t) else transTm t
 
 data Def = Def {defName :: Id, defArgs:: [Id], defBody :: Expr} | SpecDef {sdefNAme :: Id, sdefArgs :: [CoqArg], sdefRet :: CoqArg, sdefBody :: [Tactic]} | RefDef {name :: Id, args:: [CoqArg], ret:: CoqArg, state :: LookupState}
 instance Show Def where
@@ -316,7 +321,7 @@ instance Show Def where
       unrefApplCast = if unrefApplSubsetTp then Project unrefinedApply else unrefinedApply
       destructs = unwords (map destructSubsetArgIfNeeded args)
       retTp = uncurry3 RExpr retft 
-      refinedDefinien = "Proof.\n  " ++ (if all isSpace destructs then "" else destructs ++ "\n  ") ++ "exact " ++ addParens (injectUnrefAppl unrefApplCast) ++". \n" ++ "Defined.\n"
+      refinedDefinien = "Proof.\n  " ++ (if all isSpace destructs then "" else destructs ++ "\n  ") ++ "smt_now refine " ++ addParens (injectUnrefAppl unrefApplCast) ++". \n" ++ "Defined.\n"
       refinedDef = "Definition " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArgRes retft ++ " .\n" ++ refinedDefinien
     in refinedDef
 
@@ -389,11 +394,17 @@ injectArgument (name, typ, reft) = Inject typ (Var name) Nothing
 subsumptionCast :: LookupState -> Type  -> (Id, Prop) -> (Id, Prop) -> Expr -> Expr
 subsumptionCast s typ need@(_, needRef) have tm = SubCast typ need have tm (if isDefnSpecMode s && isTrivial needRef then Just $ ProofTerm "I" else Nothing)
 
+appSub :: Expr -> Expr -> Expr
+appSub = Bop AppSub
+
+applySubs :: Id -> [Expr] -> Expr
+applySubs f = foldl appSub (Var f)
+
 instance Show Expr where
   show (Sym s)        = s
   show (App f [])     = filterWeird f
   show (App f es)     = f ++ " " ++ unwords (map showAppArg es)
-  show (Bop bop e1 e2)    = addParens (show e1) ++ show bop ++ addParens (show e2)
+  show (Bop bop e1 e2)    = addParens (show e1) ++ " "++show bop ++ " "++addParens (show e2)
   show (Var v)       = filterWeird v
   show (Let n b e)   = "let " ++ filterWeird n ++ " := " ++ show b ++ " in " ++ show e
   show (Match e (Just n) branches) =
@@ -462,7 +473,7 @@ data Prop = PExpr Expr
 
 instance Show Prop where
   show (PExpr e) = show e
-  show (Brel rel e1 e2)   = addParens $ show e1 ++ show rel ++ addParens (show e2)
+  show (Brel rel e1 e2)   = addParens $ show e1 ++ " "++show rel ++" "++ addParens (show e2)
   show (And ps)           = intercalate " /\\ " $ map show ps
   show (Or ps)            = intercalate " \\/ " $ map show ps
   show (Impl ante concl)  = show ante ++ "->" ++ show concl
@@ -480,13 +491,14 @@ instance Show Brel where
   show Lt = "<"
   show Gt = ">"
 
-data Bop = Plus | Minus | Times | Div | Mod deriving (Data, Eq)
+data Bop = Plus | Minus | Times | Div | Mod | AppSub deriving (Data, Eq)
 instance Show Bop where 
   show Plus = "+"
   show Minus = "-"
   show Times = "*"
   show Div = "/"
   show Mod = undefined
+  show AppSub = "_@_"
 
 data BuildInTps = Integer | Boolean | Double deriving (Data, Eq)
 -- CoqInt and CoqFloat are defined in LHTactics file to avoid nameclashes with names from translated LH
