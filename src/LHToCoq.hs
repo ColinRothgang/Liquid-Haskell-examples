@@ -56,7 +56,21 @@ run args = do
       LH.Result (state, translatedSourceContent) = translateToCoq lhSource
       translatedFile = preamble ++ map show translatedSourceContent
       output = intercalate "\n" translatedFile
-     
+
+      isPrefix [] [] = True
+      isPrefix [] l = True
+      isPrefix m [] = False
+      isPrefix (hL:tlL) (h:tl) = hL == h && isPrefix tlL tl
+
+      isSubString [] [] = True
+      isSubString l [] = False
+      isSubString l@(hdL:tlL) (m@(h:tl)) = (hdL == h && isPrefix tlL tl) || isSubString l tl
+
+      printPositives = False
+      consideredDependency = "geqN"
+
+      toPrint n x = "add_mono_r" `isSubString` show x -- n `isSubString` show x /= (x `dependsOn` n)-- && (not (x `dependsOn` n) || printPositives)
+
     -- mapM_ (putStrLn . show) dataDecls --(putStrLn . (showSDocUnsafe . ppr)) dataDecls
     -- mapM_ (putStrLn . (showSDocUnsafe . ppr)) binds
     -- putStrLn ((showSDocUnsafe . ppr) $ head binds)
@@ -64,7 +78,10 @@ run args = do
 
 
     -- mapM_ print lhDefs
-    -- mapM_ print parsedSource
+    mapM_ print parsedSource
+
+    -- mapM_ (\x -> print (show x++" `dependsOn` "++consideredDependency++": "++show (x `dependsOn` consideredDependency))) (filter (toPrint consideredDependency) parsedSource)
+
 
     putStrLn $ "\nThe translation to Coq yields: \n" ++ output
     putStrLn $ "Writing output to file at "++outputPath
@@ -187,7 +204,7 @@ translateToCoq srcConts =
       unrefinedBody = runRename body
       coqArgs = map (transLHArg s) args
       unrefName = C.unrefinedName name
-      unrefRet = transLHArg s retrf
+      unrefRet = let (n, typ, p) = transLHArg s retrf in (n, typ, C.removeEqSelfRef n p)
       unrefDefState = State [(unrefName, coqArgs, Left unrefRet)] [] [] [] DefProofMode
       definModeS = s `concatState` unrefDefState
       coqDefinien = transformTop definModeS (Def unrefName argNames unrefinedBody)

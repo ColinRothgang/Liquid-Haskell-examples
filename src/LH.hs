@@ -16,6 +16,7 @@ import Util
 import qualified Data.Bifunctor as B
 import Debug.Trace
 
+
 data Proof = Proof Def Signature deriving Show
 data Def = Def {defName :: Id, defArgs:: [Id], defBody :: Expr} deriving Show
 data Expr = Term LHExpr
@@ -199,8 +200,12 @@ transExpr :: InternalState -> Expr -> C.Expr
 transExpr s (Term x)   = transLHExpr s x
 transExpr s (Let id e1 e2)  = C.Let id (transExpr s e1) (transExpr s e2)
 -- only add match pattern "as b" if match branches use b
-transExpr s (Case e b bs) | any (\(_, x) -> x `dependsOn` b) bs = C.Match (transExpr s e) b $ map (B.bimap transPat $ transExpr s) bs
-transExpr s (Case e _ bs) = C.MatchSimple (transExpr s e) $ map (B.bimap transPat $ transExpr s) bs
+transExpr s (Case e b  bs) = if any (\(_, x) -> x `dependsOn` b) bs then match (Just b) else match Nothing where
+    -- vO = case e of (Term (LHVar v)) -> Just v; _ -> Nothing
+    -- subst = M.fromList [(b, b++"_remembered")| b <- []] -- maybeToList vO]
+    bsT = map (B.bimap transPat $ transExpr s) bs -- map (B.bimap transPat (transExpr s. (flip runReader subst . renameExpr))) bs
+    match bO = C.Match (transExpr s e) bO bsT
+
 transExpr _ Unit            = C.Var "()"
 transExpr s (QMark e1 e2)   = C.App "(?)" $ map (transExpr s) [e1,e2]
 
@@ -285,8 +290,11 @@ transLHExpr s (Bop bop t u) = transOp s bop t u
 transLHExpr _ (LHIntLit i)  = C.IntLiteral i
 transLHExpr _ (LHStringLit s)= C.StringLiteral s
 transLHExpr _ (LHFloatLit f)= C.FloatLiteral f
-transLHExpr s e             = error $ "not an expression:" ++ show e
-
+transLHExpr s (LHNeg f) = C.EProp (C.Neg $ transProp s f)
+transLHExpr s (And fs) = C.EProp (C.And $ map (transProp s) fs)
+transLHExpr s (Or fs) = C.EProp (C.Or $ map (transProp s) fs)
+transLHExpr s (LHImpl f g) = C.EProp (C.Impl (transProp s f) (transProp s g))
+transLHExpr s LHTrue = C.EProp C.TT
 
 projectIfNeeded s = C.projectIfNeededGeneric (toLookupState s)
 transRel :: InternalState -> Brel -> LHExpr -> LHExpr -> C.Prop
@@ -432,6 +440,8 @@ transIndDef :: InternalState -> Def -> Arg -> [C.Tactic]
 transIndDef s (Def name args (Case (Term (LHVar ind)) _ [(_,e1), (_,e2)])) (pos, indVar) =
     [induction [transBranch s e1, transBranch s e2]]
   where
+    -- subst = M.fromList [(indArg, indArg++"_rememberedI")]
+    -- [e1T, e2T] = map (flip runReader subst . renameExpr) [e1, e2]
     allArgs = nonIndArgs
     nonIndArgs = deleteAt args pos
     indArg = args !! pos
@@ -523,11 +533,11 @@ instance Eq SourceContent where
 
 instance Dependencies SourceContent where
   dependsOn (Import _) _ = False
-  dependsOn (Alias _ expr) name = dependsOn expr name
+  dependsOn (Alias _ expr) name = expr `dependsOn` name
   dependsOn (Data _ idO constrs) name = idO == Just name || any (\(_, typs) -> any (`dependsOn` name) typs) constrs
-  dependsOn (Type _ typ) name = dependsOn typ name
-  dependsOn (Definition _ args ret expr) name = any (`dependsOn` name) args || dependsOn ret name || dependsOn expr name
-  dependsOn (Theorem _ args ret expr) name = any (`dependsOn` name) args || dependsOn ret name || dependsOn expr name
+  dependsOn (Type _ typ) name = typ `dependsOn` name
+  dependsOn (Definition _ args ret expr) name = any (`dependsOn` name) args || ret `dependsOn` name || expr `dependsOn` name
+  dependsOn (Theorem _ args ret expr) name = any (`dependsOn` name) args || ret `dependsOn` name || expr `dependsOn` name
 
 appearsNoLater :: Id -> Id -> [Id] -> Ordering
 appearsNoLater id id2 [] = LT
@@ -546,4 +556,7 @@ orderSourceContent _ srcCont srcCont2 | dependsOn srcCont (name srcCont2) = GT
 orderSourceContent idList (Alias n _) (Alias m _)             = appearsNoLater n m idList
 orderSourceContent _ Alias{} _ = LT
 orderSourceContent _ _ Alias{} = GT
+orderSourceContent idList (Definition n _ _ _) (Definition m _ _ _) = appearsNoLater n m idList
+orderSourceContent idList (Definition n _ _ _) _ = LT
+orderSourceContent idList _ (Definition n _ _ _) = GT
 orderSourceContent idList sC sC2 = appearsNoLater (name sC) (name sC2) idList

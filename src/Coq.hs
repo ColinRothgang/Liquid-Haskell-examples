@@ -27,8 +27,8 @@ instance Show Theorem where
   show (Theorem name args ty bod) =
     "Definition "++ name ++"_spec: Prop. \nProof. "
     ++ "smt_now "++dropWhile isSpace (show (Exact (Forall (map (\(n,t,r) -> (n,Just (RExpr n t r))) args) ty)))
-    ++ ".\nDefined.\n"
-    ++ "Theorem " ++ name ++ ": " ++ name++"_spec" ++ ".\n"
+    ++ "\nDefined.\n"
+    ++ "Theorem " ++ name ++ ": " ++ name++"_spec." ++ "\n"
     ++ "Proof.\n  "
     ++ introsArgs args
     ++ destructArgs args
@@ -46,9 +46,15 @@ showArg :: CoqArg -> String
 showArg (arg, t, prop) | not $ printRef prop = addParens $ arg ++ ": " ++ show t
 showArg (arg, t, p) = addParens (arg ++ ": { "++arg++" : " ++ show t ++ " | " ++ show p ++ " }")
 
-showArgUnnamed :: CoqArg -> String
-showArgUnnamed (arg, t, prop) | not $ printRef prop = show t
-showArgUnnamed (arg, t , p) = "{ "++arg++" : " ++ show t ++ " | " ++ show p ++ " }"
+removeEqSelfRef :: Id -> Prop -> Prop
+removeEqSelfRef n (And [Brel Eq (Var v) res, other]) | v == n = other
+removeEqSelfRef n (And ((Brel Eq (Var v) res):others)) | v == n = And others
+removeEqSelfRef n ref = ref
+
+
+showArgRes :: CoqArg -> String
+showArgRes (arg, t, prop) | not $ printRef prop = show t
+showArgRes (arg, t , p) = "{ "++arg++" : " ++ show t ++ " | " ++ show p ++ " }"
 
 showArgId :: CoqArg -> String
 showArgId (n, _, _) = n
@@ -89,8 +95,12 @@ getRefinementsExpr _ _ (StringLiteral _) = []
 getRefinementsExpr _ _ (IntLiteral _) = []
 getRefinementsExpr _ _ (FloatLiteral _) = []
 getRefinementsExpr _ _ (Sym _) = []
-getRefinementsExpr _ _ (Bop _ _ _) = []
-getRefinementsExpr _ _ (EProp (Brel _ _ _)) = []
+getRefinementsExpr _ _ (Bop{}) = []
+getRefinementsExpr _ _ (EProp (Brel{})) = []
+getRefinementsExpr _ _ (EProp (And{})) = []
+getRefinementsExpr _ _ (EProp (Or{})) = []
+getRefinementsExpr _ _ (EProp (Neg{})) = []
+getRefinementsExpr _ _ (EProp (Impl{})) = []
 getRefinementsExpr s n (Inject (RExpr _ _ prop) x _) | not (printRef prop) = getRefinementsExpr s n x
 getRefinementsExpr s n (Project (Inject typ x prf)) = getRefinementsExpr s n x
 getRefinementsExpr s n (Project tm) = tail $ getRefinementsExpr s n tm
@@ -114,13 +124,12 @@ getRefinementsExpr s n exp@(Var v) =
   in 
     case argSpec of
     -- a hypothesis or result of destructing terms in the proof state
-    Nothing -> trace (show v++" is not an argument to function "++n++" with funcSpec "++show funcSpec) []
+    Nothing -> {-trace (show v++" is not an argument to function "++n++" with funcSpec "++show funcSpec)-} []
     -- if in proof mode, we know that any subset typed argument has long been destructed by now
     Just arg -> 
       if isDefnMode s then {-trace ("fetching refinements for arg: "++showArg arg++" of "++n)-} getRefinementsCoqArg arg else []
 getRefinementsExpr s n e = case e of
   Ite _ expr _ -> getRefinementsExpr s n expr
-  MatchSimple _ patExprs -> getRefinementsExpr s n $ (snd . head) patExprs
   Match _ _ patExprs -> getRefinementsExpr s n $ (snd . head) patExprs
   _ -> trace ("Term "++show e++" is assumed (by default) to have a single trivial refinement.") [("_", TT) | printTrivial] -- error ("Cannot determine if "++show e++" is a subset term. ")
 
@@ -169,6 +178,7 @@ substituteInType nO f typ = case typ of
 substituteInProp :: Maybe (Id, Natural) -> ((Id, Natural) -> Id -> Expr) -> Prop -> Prop
 substituteInProp nO f p = case p of
   Brel rel left right -> Brel rel (subst left) (subst right)
+  PExpr expr -> PExpr $ subst expr
   And conjs -> And (map trans conjs)
   Or disjs -> Or (map trans disjs)
   Impl ante concl -> Impl (trans ante) (trans concl)
@@ -182,10 +192,9 @@ substituteInProp nO f p = case p of
 substituteInTerm :: Maybe (Id, Natural) -> ((Id, Natural) -> Id -> Expr) -> Expr -> Expr
 substituteInTerm nO f expr = case expr of
   (Var n) -> maybe (Var n) (`f` n) nO
-  (App n xs) -> trace("substituting in application of "++rename n) App (rename n) (zipWith (\i -> substituteInTerm (Just (n,i)) f) [0..] xs)
+  (App n xs) -> {-trace("substituting in application of "++rename n)-} App (rename n) (zipWith (\i -> substituteInTerm (Just (n,i)) f) [0..] xs)
   (Bop op left right) -> Bop op (subst left) (subst right)
   (Match e n branches) -> Match (subst e) n (mapBranches branches)
-  (MatchSimple e branches) -> MatchSimple (subst e) (mapBranches branches)
   (Ite cond thenE elseE) -> Ite (trans cond) (subst thenE) (subst elseE)
   (Let n defn body) -> Let n (subst defn) (subst body)
   (Inject typ expr prf) -> Inject (transTp typ) (subst expr) (subst <$> prf)
@@ -229,7 +238,7 @@ reprocessRef s tm ref = trans ref where
         tmRefs = getRefinementsExpr s n (Var v)
         tmRefsSubst = mapSnd (substituteInProp Nothing (maybe (\_ v -> Var v) (transForAppl s) tm)) tmRefs
         castVar = castInto s (Var v) tmRefsSubst (Left expCArg)
-      in trace ("Cast in reprocessRef (for ref "++ show ref++") for variable "++v++" with refs "++show tmRefsSubst++" to type "++showArg expCArg++" yielding "++show castVar) castVar
+      in {-trace ("Cast in reprocessRef (for ref "++ show ref++") for variable "++v++" with refs "++show tmRefsSubst++" to type "++showArg expCArg++" yielding "++show castVar)-} castVar
     Nothing -> Var v
   trans = substituteInProp Nothing f
 
@@ -278,7 +287,7 @@ refineApplyGeneric s transTm getRefs n args = {- trace ("Calling refineApplyGene
       expected = if dataArg && dataRes && isTrivial ref then Right typ else Left expectedSpec
     in
     castInto s tm (getRefs s (fst3 $ last allSpecs) t) expected
-  cast t i | not (hasSpec i) = error $ "No specs found for "++n -- if getRefs allSpecs n t then Project (transTm t) else transTm t
+  cast t i | not (hasSpec i) = transTm t -- error $ "No specs found for "++n++" found specs: \n"++show allSpecs -- if getRefs allSpecs n t then Project (transTm t) else transTm t
 
 data Def = Def {defName :: Id, defArgs:: [Id], defBody :: Expr} | SpecDef {sdefNAme :: Id, sdefArgs :: [CoqArg], sdefRet :: CoqArg, sdefBody :: [Tactic]} | RefDef {name :: Id, args:: [CoqArg], ret:: CoqArg, state :: LookupState}
 instance Show Def where
@@ -286,7 +295,7 @@ instance Show Def where
     "Fixpoint " ++ name ++ " " ++ unwords args ++ " :=\n"
     ++ "  " ++ show body ++ ".\n"
   show (SpecDef name args retft tacs) = 
-    "Definition " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArgUnnamed retft ++ ". \n"++ "Proof.\n  "
+    "Definition " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArgRes retft ++ ". \n"++ "Proof.\n  "
     ++ destructArgs args
     ++ intercalate "" (map show tacs) ++ "\n"
     ++ "Defined.\n"
@@ -308,7 +317,7 @@ instance Show Def where
       destructs = unwords (map destructSubsetArgIfNeeded args)
       retTp = uncurry3 RExpr retft 
       refinedDefinien = "Proof.\n  " ++ (if all isSpace destructs then "" else destructs ++ "\n  ") ++ "exact " ++ addParens (injectUnrefAppl unrefApplCast) ++". \n" ++ "Defined.\n"
-      refinedDef = "Definition " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArgUnnamed retft ++ " .\n" ++ refinedDefinien
+      refinedDef = "Definition " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArgRes retft ++ " .\n" ++ refinedDefinien
     in refinedDef
 
 
@@ -353,8 +362,7 @@ instance Show Pat where
 data Expr = App Id [Expr]
           | Bop Bop Expr Expr
           | Var Id
-          | Match Expr Id [(Pat, Expr)]
-          | MatchSimple Expr [(Pat, Expr)]
+          | Match Expr (Maybe Id) [(Pat, Expr)]
           | Ite Prop Expr Expr
           | Let Id Expr Expr
           | Sym String
@@ -385,15 +393,15 @@ instance Show Expr where
   show (Sym s)        = s
   show (App f [])     = filterWeird f
   show (App f es)     = f ++ " " ++ unwords (map showAppArg es)
-  show (Bop bop e1 e2)    = show e1 ++ show bop ++ show e2
+  show (Bop bop e1 e2)    = addParens (show e1) ++ show bop ++ addParens (show e2)
   show (Var v)       = filterWeird v
   show (Let n b e)   = "let " ++ filterWeird n ++ " := " ++ show b ++ " in " ++ show e
-  show (Match e n branches) =
+  show (Match e (Just n) branches) =
       "match " ++ show e ++ " as " ++ filterWeird n ++ " with "
       ++ unwords (map showBranch branches) ++ " end"
     where
       showBranch (p, e) = "| " ++ show p ++ " => " ++ show e
-  show (MatchSimple e branches) =
+  show (Match e Nothing branches) =
       "match " ++ show e ++ " with "
       ++ unwords (map showBranch branches) ++ " end"
     where
@@ -454,13 +462,14 @@ data Prop = PExpr Expr
 
 instance Show Prop where
   show (PExpr e) = show e
-  show (Brel rel e1 e2)   = show e1 ++ show rel ++ show e2
+  show (Brel rel e1 e2)   = addParens $ show e1 ++ show rel ++ addParens (show e2)
   show (And ps)           = intercalate " /\\ " $ map show ps
   show (Or ps)            = intercalate " \\/ " $ map show ps
   show (Impl ante concl)  = show ante ++ "->" ++ show concl
   show (Neg form)         = "not" ++ addParens (show form)
   show TT                 = "True"
   show FF                 = "False"
+
 
 data Brel = Eq | Neq | Leq | Geq | Lt | Gt deriving (Data, Eq)
 instance Show Brel where 
@@ -529,13 +538,16 @@ instance Show Tactic where
   show (Solve e) = solve ++ " " ++ showAppArg e++". "
   -- TODO generalize destruct
   show (Destruct (Var n) binds branches) =
+      -- "remember "++n++" as "++n++"_remembered. "++
       "destruct " ++ n ++ " as [" ++ intercalate " | " (map unwords binds) ++ " ]. "
       ++ showBranches branches
   show (Destruct e binds branches) = 
       "destruct " ++ show e ++ " as [" ++ intercalate " | " (map unwords binds) ++ " ]. "
       ++ showBranches branches
   show (Induction arg var hyp introPats branches) =
+      -- "remember "++arg++" as "++arg++"_rememberedI. "++
       "induction " ++ arg ++ " as [| " ++ unwords introPats ++ " ]. "
+      -- ++"destruct "++arg++"_rememberedI as ["++arg++"]. "
       ++ showBranches branches
   show (Assert hypName claim prf) = "\n  assertFresh " ++ addParens (show claim) ++ " as "++ hypName ++ " using "  ++ proof++". " where
     proof = if not (null prf) then addParens (intercalate "; " (map show prf)) else show Trivial

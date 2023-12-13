@@ -36,7 +36,7 @@ trans app@App{}
   | name == "?" = LH.QMark first second
   | name == "patError" = LH.Unit -- patError parts replaced by trivial.
   | name == "()" = LH.Unit
-  | name == "I#" = singleArg
+  | name `elem` ["I#", "I"] = singleArg
   | not (null brel) = LH.Term $ LH.Brel (fromJust brel) (LH.evaluate first) (LH.evaluate second)
   | not (null bop) = LH.Term $ LH.Bop (fromJust bop) (LH.evaluate first) (LH.evaluate second)
 
@@ -146,9 +146,14 @@ buildins = M.fromList[ ("Integer", LH.Integer)
                   , ("Float", LH.Double)
                   ]
 
+removeIllegalCharacters :: Id -> Id
+removeIllegalCharacters = filter (not . (`elem` illegalChars))
+
+illegalChars :: [Char]
+illegalChars = ['$','#']
 
 fixIllegalName :: Id -> Id
-fixIllegalName n = fromMaybe n (M.lookup n illegalNamesMap)
+fixIllegalName n = fromMaybe (removeIllegalCharacters n) (M.lookup n illegalNamesMap)
 
 illegalNamesMap :: M.HashMap String String
 illegalNamesMap = M.fromList [

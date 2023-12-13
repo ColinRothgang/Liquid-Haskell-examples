@@ -27,6 +27,7 @@ toInt :: N -> Int
 toInt Z = 0
 toInt (Suc n) = 1 + toInt n
 
+{-@ measure toInt @-}
 -- | Addition of natural numbers
 {-@ reflect add @-}
 {-@ add :: m:N -> n:N -> N @-}
@@ -143,7 +144,7 @@ mult_assoc (Suc m) n o =                    mult (mult (Suc m) n) o
         ? mult_assoc m n o              === (n `mult` o) `add` (m `mult` (n `mult` o))
                                         === (Suc m) `mult` (mult n o)           *** QED
 
-{-
+
 -- | Equality of natural numbers
 {-@ reflect eqN @-}
 {-@ eqN :: m:N -> n:N -> {r:Bool | r = (m == n) }@-}
@@ -390,6 +391,7 @@ notZ :: N -> Proof
 notZ Z = trivial
 notZ (Suc n) = trivial
 
+{-
 -- {-@ reflect impossibleValue @-}
 {-@ impossibleValue :: {s:String | False} -> a @-}
 impossibleValue :: String -> a
