@@ -80,12 +80,12 @@ useAppSub = False
 printRef :: Prop-> Bool
 printRef p = printTrivial || not (isTrivial p) 
 
-data LookupState = State {specs :: [(Id, [CoqArg], Either CoqArg Prop)], datatypeConstrs :: [Id], isDefnMode:: Bool, isDefnSpecMode:: Bool}
+data LookupState = State {specs :: [(Id, [CoqArg], Either CoqArg Prop)], datatypeConstrs :: [Id], isDefnMode:: Bool, isDefnSpecMode ::Bool, getSpecArg:: Maybe Id}
 defSpecs :: LookupState -> [(Id, [CoqArg], CoqArg)]
 defSpecs s = mapMaybe (\(x, y, e) -> (x,y,) <$> leftToMaybe e) $ specs s
 
 fromSpecs :: [(Id, [CoqArg], Either CoqArg Prop)] -> LookupState
-fromSpecs specs = State specs [] False False
+fromSpecs specs = State specs [] False False Nothing
 
 getRefinementsLastSpec :: LookupState -> [(Id, Prop)]
 getRefinementsLastSpec s = maybe [] getRefinementsCoqArg (leftToMaybe r) where
@@ -118,6 +118,7 @@ getRefinementsExpr s _ exp@(App n _) | isJust (find ((== n) . fst3) $ defSpecs s
     (_, _, coqArg) = funSpec
   in getRefinementsCoqArg coqArg
 getRefinementsExpr s _ exp@(Var v) | v `elem` datatypeConstrs s = []
+getRefinementsExpr s _ exp@(Var v) | Just v == getSpecArg s = []
 getRefinementsExpr s _ exp@(Var v@('I':'H':_)) = getRefinementsLastSpec s
 getRefinementsExpr s "" exp@Var{} = getRefinementsExpr s (fst3 $ (last . specs) s) exp
 getRefinementsExpr s n exp@(Var v) = 
@@ -130,7 +131,7 @@ getRefinementsExpr s n exp@(Var v) =
     Nothing -> {-trace (show v++" is not an argument to function "++n++" with funcSpec "++show funcSpec)-} []
     -- if in proof mode, we know that any subset typed argument has long been destructed by now
     Just arg -> 
-      if isDefnMode s then {-trace ("fetching refinements for arg: "++showArg arg++" of "++n)-} getRefinementsCoqArg arg else []
+      if isDefnMode s then getRefinementsCoqArg arg else []
 getRefinementsExpr s n e = case e of
   Ite _ expr _ -> getRefinementsExpr s n expr
   Match _ _ patExprs -> getRefinementsExpr s n $ (snd . head) patExprs

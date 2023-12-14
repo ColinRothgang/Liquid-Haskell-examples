@@ -116,7 +116,7 @@ Proof.
   smt_now refine (exist (` (leN_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _))) eq_refl). 
 Defined.
 
-Definition subt_unrefined (m: { m : Natural | True }) (n: { n : Natural | (` (geqN m n)) }): { o : Natural | (((` (n)) <> (ZeroN)) = ((` (toInt (injectionCast Natural (fun n: Natural => True) (o) I))) < (` (toInt m)))) }. 
+Definition subt_unrefined (m: { m : Natural | True }) (n: { n : Natural | (` (geqN m (injectionCast Natural (fun n: Natural => True) (n) I))) }): { o : Natural | (((` (n)) <> (ZeroN)) = ((` (toInt (injectionCast Natural (fun n: Natural => True) (o) I))) < (` (toInt m)))) }. 
 Proof.
   destruct m as [m mp ].  destruct n as [n np ]. 
   induction m as [| m IHm ]. 
@@ -124,10 +124,10 @@ Proof.
     { destruct n as [ | n ]. smt_now unshelve refine (injectionCast Natural (fun o: Natural => (((` (n)) <> (ZeroN)) = ((` (toInt (injectionCast Natural (fun n: Natural => True) (o) I))) < (` (toInt m))))) (Suc m) _). smt_now unshelve refine (IHm). }
 Defined.
 
-Definition subt (m: { m : Natural | True }) (n: { n : Natural | (` (geqN m n)) }): { o : Natural | ((` (subt_unrefined m n)) = (o)) } .
+Definition subt (m: { m : Natural | True }) (n: { n : Natural | (` (geqN m (injectionCast Natural (fun n: Natural => True) (n) I))) }): { o : Natural | ((` (subt_unrefined m n)) = (o)) } .
 Proof.
   destruct m as [m mp ].  destruct n as [n np ]. 
-  smt_now refine (exist (` (subt_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN m n))) (n) _))) eq_refl). 
+  smt_now refine (exist (` (subt_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN m (injectionCast Natural (fun n: Natural => True) (n) I)))) (n) _))) eq_refl). 
 Defined.
 
 Definition add_zero_l_spec: Prop. 
@@ -217,7 +217,7 @@ Proof.
 Qed.
 
 Definition add_subt_spec: Prop. 
-Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| True}), ((` (subt (subsumptionCast Natural (fun VV: Natural => ((` (add_unrefined m n)) = (VV))) (fun m: Natural => True) _ (add m n)) (subsumptionCast Natural (fun n: Natural => True) (fun n: Natural => (` (geqN m n))) _ (n)))) = (` (m)))). 
+Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| True}), ((` (subt (subsumptionCast Natural (fun VV: Natural => ((` (add_unrefined m n)) = (VV))) (fun m: Natural => True) _ (add m n)) (subsumptionCast Natural (fun n: Natural => True) (fun n: Natural => (` (geqN m (injectionCast Natural (fun n: Natural => True) (n) I)))) _ (n)))) = (` (m)))). 
 Defined.
 Theorem add_subt: add_subt_spec.
 Proof.
@@ -506,7 +506,7 @@ Proof.
 Qed.
 
 Definition geq_suc_l_spec: Prop. 
-Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| (` (geqN m n))}), (` (geqN (injectionCast Natural (fun m: Natural => True) (Suc (` (m))) _) (subsumptionCast Natural (fun n: Natural => (` (geqN m n))) (fun n: Natural => True) _ (n))))). 
+Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| (` (geqN m (injectionCast Natural (fun n: Natural => True) (n) I)))}), (` (geqN (injectionCast Natural (fun m: Natural => True) (Suc (` (m))) _) (subsumptionCast Natural (fun n: Natural => (` (geqN m (injectionCast Natural (fun n: Natural => True) (n) I)))) (fun n: Natural => True) _ (n))))). 
 Defined.
 Theorem geq_suc_l: geq_suc_l_spec.
 Proof.
@@ -517,7 +517,7 @@ Proof.
 Qed.
 
 Definition geq_ge_suc_spec: Prop. 
-Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| (` (geqN m (subsumptionCast Natural (fun n: Natural => (` (geqN m n))) (fun n: Natural => True) I (n))))}), (` (geN (injectionCast Natural (fun m: Natural => True) (Suc (` (m))) _) (subsumptionCast Natural (fun n: Natural => (` (geqN m (subsumptionCast Natural (fun n: Natural => (` (geqN m n))) (fun n: Natural => True) I (n))))) (fun n: Natural => True) _ (n))))). 
+Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| (` (geqN m (injectionCast Natural (fun n: Natural => True) (n) I)))}), (` (geN (injectionCast Natural (fun m: Natural => True) (Suc (` (m))) _) (subsumptionCast Natural (fun n: Natural => (` (geqN m (injectionCast Natural (fun n: Natural => True) (n) I)))) (fun n: Natural => True) _ (n))))). 
 Defined.
 Theorem geq_ge_suc: geq_ge_suc_spec.
 Proof.
@@ -528,7 +528,7 @@ Proof.
 Qed.
 
 Definition ge_suc_l_spec: Prop. 
-Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| (` (geN m (subsumptionCast Natural (fun n: Natural => (` (geqN m (subsumptionCast Natural (fun n: Natural => (` (geqN m n))) (fun n: Natural => True) I (n))))) (fun n: Natural => True) I (n))))}), (` (geN (injectionCast Natural (fun m: Natural => True) (Suc (` (m))) _) (subsumptionCast Natural (fun n: Natural => (` (geN m (subsumptionCast Natural (fun n: Natural => (` (geqN m (subsumptionCast Natural (fun n: Natural => (` (geqN m n))) (fun n: Natural => True) I (n))))) (fun n: Natural => True) I (n))))) (fun n: Natural => True) _ (n))))). 
+Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| (` (geN m (injectionCast Natural (fun n: Natural => True) (n) I)))}), (` (geN (injectionCast Natural (fun m: Natural => True) (Suc (` (m))) _) (subsumptionCast Natural (fun n: Natural => (` (geN m (injectionCast Natural (fun n: Natural => True) (n) I)))) (fun n: Natural => True) _ (n))))). 
 Defined.
 Theorem ge_suc_l: ge_suc_l_spec.
 Proof.
@@ -572,7 +572,7 @@ Proof.
 Qed.
 
 Definition subt_self_spec: Prop. 
-Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| True}), (` (eqN m n))->((` (subt m (subsumptionCast Natural (fun n: Natural => True) (fun n: Natural => (` (geqN m n))) _ (n)))) = (ZeroN))). 
+Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| True}), (` (eqN m n))->((` (subt m (subsumptionCast Natural (fun n: Natural => True) (fun n: Natural => (` (geqN m (injectionCast Natural (fun n: Natural => True) (n) I)))) _ (n)))) = (ZeroN))). 
 Defined.
 Theorem subt_self: subt_self_spec.
 Proof.
@@ -583,7 +583,7 @@ Proof.
 Qed.
 
 Definition subt_suc_l_spec: Prop. 
-Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| (` (geqN m n))}), ((` (subt (injectionCast Natural (fun m: Natural => True) (Suc (` (m))) _) n)) = (Suc (` (subt m n))))). 
+Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| (` (geqN m (injectionCast Natural (fun n: Natural => True) (n) I)))}), ((` (subt (injectionCast Natural (fun m: Natural => True) (Suc (` (m))) _) n)) = (Suc (` (subt m n))))). 
 Defined.
 Theorem subt_suc_l: subt_suc_l_spec.
 Proof.
@@ -605,29 +605,29 @@ Proof.
 Qed.
 
 Definition subt_leq_spec: Prop. 
-Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| (` (geqN (injectionCast Natural (fun m: Natural => True) (m) I) n))}), (` (geqN m (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined m n)) = (o))) (fun n: Natural => True) _ (subt m (subsumptionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) I) n))) (fun n: Natural => (` (geqN m n))) _ (n))))))). 
+Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| (` (geqN (injectionCast Natural (fun m: Natural => True) (m) I) (injectionCast Natural (fun n: Natural => True) (n) I)))}), (` (geqN m (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined m n)) = (o))) (fun n: Natural => True) _ (subt m (subsumptionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) I) (injectionCast Natural (fun n: Natural => True) (n) I)))) (fun n: Natural => (` (geqN m (injectionCast Natural (fun n: Natural => True) (n) I)))) _ (n))))))). 
 Defined.
 Theorem subt_leq: subt_leq_spec.
 Proof.
   intros m. intros n. destruct m as [m mp ].  destruct n as [n np ]. 
   induction m as [| m IHm ]. 
     { destruct n as [ | lq_anf7205759403792798697 ]. smt_now smt_trivial. destruct () as [ ]. }
-    { destruct n as [ | n ]. smt_app (geq_refl (injectionCast Natural (fun n: Natural => True) (m) _)). smt_app IHm. smt_app (geq_suc (injectionCast Natural (fun n: Natural => True) (m) _)). smt_app (geq_trans (injectionCast Natural (fun m: Natural => True) (Suc m) _) (injectionCast Natural (fun n: Natural => True) (m) _) (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (n) _))) = (o))) (fun o: Natural => True) _ (subt (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (n) _)))). }
+    { destruct n as [ | n ]. smt_app (geq_refl (injectionCast Natural (fun n: Natural => True) (m) _)). smt_app IHm. smt_app (geq_suc (injectionCast Natural (fun n: Natural => True) (m) _)). smt_app (geq_trans (injectionCast Natural (fun m: Natural => True) (Suc m) _) (injectionCast Natural (fun n: Natural => True) (m) _) (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (n) _))) = (o))) (fun o: Natural => True) _ (subt (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (n) _)))). }
 Qed.
 
 Definition subt_le_spec: Prop. 
-Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| (` (geqN m (subsumptionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) I) n))) (fun n: Natural => True) I (n))))}), ((` (n)) <> (ZeroN))->(` (geN m (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined m n)) = (o))) (fun n: Natural => True) _ (subt m (subsumptionCast Natural (fun n: Natural => (` (geqN m (subsumptionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) I) n))) (fun n: Natural => True) I (n))))) (fun n: Natural => (` (geqN m n))) _ (n))))))). 
+Proof. smt_now unshelve refine (forall (m:{m: Natural| True}) (n:{n: Natural| (` (geqN m (injectionCast Natural (fun n: Natural => True) (n) I)))}), ((` (n)) <> (ZeroN))->(` (geN m (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined m n)) = (o))) (fun n: Natural => True) _ (subt m n))))). 
 Defined.
 Theorem subt_le: subt_le_spec.
 Proof.
   intros m. intros n. destruct m as [m mp ].  destruct n as [n np ]. 
   
     { destruct m as [ | m ]. destruct n as [ | lq_anf7205759403792798710 ]. smt_now smt_trivial. destruct () as [ ]. destruct n as [ | n ]. smt_app (geq_refl (injectionCast Natural (fun n: Natural => True) (m) _)). 
-  assertFresh ((` (subt (injectionCast Natural (fun m: Natural => True) (Suc m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (Suc n) _))) = (` (subt (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (n) _)))) as lem using smt_trivial. . smt_app (subt_leq (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (injectionCast Natural (fun m: Natural => True) (m) _) I) (injectionCast Natural (fun n: Natural => True) (n) _)))) (n) _)). smt_app (geq_ge_suc (injectionCast Natural (fun m: Natural => True) (m) _) (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (n) _))) = (o))) (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (subsumptionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (fun n: Natural => True) I (injectionCast Natural (fun n: Natural => True) (n) _))))) _ (subt (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (n) _)))). smt_app (eq_equal (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (n) _))) = (o))) (fun m: Natural => True) _ (subt (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (n) _))) (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (n) _))) = (o))) (fun n: Natural => True) _ (subt (injectionCast Natural (fun m: Natural => True) (Suc m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (Suc n) _)))). smt_app (ge_eq_trans (injectionCast Natural (fun m: Natural => True) (Suc m) _) (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (n) _))) = (o))) (fun n: Natural => True) _ (subt (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (n) _))) (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (n) _))) = (o))) (fun o: Natural => True) _ (subt (injectionCast Natural (fun m: Natural => True) (Suc m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (n) _)))) (Suc n) _)))). }
+  assertFresh ((` (subt (injectionCast Natural (fun m: Natural => True) (Suc m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (Suc n) _))) = (` (subt (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (n) _)))) as lem using smt_trivial. . smt_app (subt_leq (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (injectionCast Natural (fun m: Natural => True) (m) _) I) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (n) _)). smt_app (geq_ge_suc (injectionCast Natural (fun m: Natural => True) (m) _) (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (n) _))) = (o))) (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) _ (subt (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (n) _)))). smt_app (eq_equal (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (n) _))) = (o))) (fun m: Natural => True) _ (subt (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (n) _))) (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (n) _))) = (o))) (fun n: Natural => True) _ (subt (injectionCast Natural (fun m: Natural => True) (Suc m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (Suc n) _)))). smt_app (ge_eq_trans (injectionCast Natural (fun m: Natural => True) (Suc m) _) (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (n) _))) = (o))) (fun n: Natural => True) _ (subt (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (n) _))) (subsumptionCast Natural (fun o: Natural => ((` (subt_unrefined (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (n) _))) = (o))) (fun o: Natural => True) _ (subt (injectionCast Natural (fun m: Natural => True) (Suc m) _) (injectionCast Natural (fun n: Natural => (` (geqN (injectionCast Natural (fun m: Natural => True) (m) _) (injectionCast Natural (fun n: Natural => True) (injectionCast Natural (fun n: Natural => True) (n) _) I)))) (Suc n) _)))). }
 Qed.
 
 Definition notZ_spec: Prop. 
-Proof. smt_now unshelve refine (forall (n:{n: Natural| ((` (n)) <> (ZeroN))}), (` (geN (injectionCast Natural (fun m: Natural => True) (Suc (` (n))) _) (injectionCast Natural (fun n: Natural => True) (one) _)))). 
+Proof. smt_now unshelve refine (forall (n:{n: Natural| (n <> (ZeroN))}), (` (geN (injectionCast Natural (fun m: Natural => True) (Suc (` (n))) _) (injectionCast Natural (fun n: Natural => True) (one) _)))). 
 Defined.
 Theorem notZ: notZ_spec.
 Proof.

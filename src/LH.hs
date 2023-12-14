@@ -75,7 +75,12 @@ data BuildInTps = Integer | Boolean | Double deriving Show
 data LHArg = LHArg { lhArgName :: Id, lhArgType :: Type, lhArgReft :: LHExpr} deriving Show
 data Signature = Signature {sigArgs :: [LHArg], sigRes :: LHArg} deriving Show
 
-data TranslationMode = DefinitionMode | DefinitionSpecMode | ProofMode | DefProofMode deriving (Eq, Show)
+-- DefinitionMode is default, should probably not be used anymore
+-- DefinitionSpecMode is used during translation of specs (when (refined) variables to the definition/theorem aren't yet destructed)
+-- SpecRefArgMode is used during translation of refinement of an arg in specs (when the variables' refinements aren't yet destructed, but the current one isn't yet refined)
+-- ProofMode is used during proofs of theorems
+-- DefProofMode is used in translation of definiens of "_unrefined" declarations
+data TranslationMode = DefinitionMode | DefinitionSpecMode | SpecRefArgMode Id | ProofMode | DefProofMode deriving (Eq, Show)
 data InternalState = State {specs:: [(Id, [C.CoqArg], Either C.CoqArg C.Prop)], datatypeConstrs :: [Id], datatypeMeasures:: [(Id, Id)], warnings :: [String], mode :: TranslationMode} deriving Show
 defSpecs :: InternalState -> [(Id, [C.CoqArg], C.CoqArg)]
 defSpecs (State specs _ _ _ _) = mapMaybe (\(x, y, e) -> (x,y,) <$> leftToMaybe e) specs
@@ -84,8 +89,12 @@ thmSpecs (State specs _ _ _ _) = mapMaybe (\(x, y, e) -> (x,y,) <$> rightToMaybe
 emptyState :: InternalState
 emptyState = State [] [] [] [] DefinitionMode
 
+changeMode :: InternalState -> TranslationMode -> InternalState
+changeMode s = State (specs s) (datatypeConstrs s) (datatypeMeasures s) (warnings s)
+
 toLookupState :: InternalState -> C.LookupState
-toLookupState s = C.State (specs s) (datatypeConstrs s) ((\s -> s == DefinitionMode || s == DefinitionSpecMode) (mode s)) (((==) DefinitionSpecMode . mode) s)
+toLookupState s = C.State (specs s) (datatypeConstrs s) (isDefnMode (mode s)) ((\s -> isDefnMode s && s /= DefinitionMode)  (mode s)) ((\m -> case m of SpecRefArgMode arg -> Just arg; _ -> Nothing) (mode s)) where
+  isDefnMode m = m /= ProofMode && m /= DefProofMode
 
 concatState :: InternalState -> InternalState -> InternalState
 concatState (State sps cs m1 w1 _) (State sps2 cs2 m2 w2 f)= State (sps ++ sps2) (cs ++ cs2) (m1 ++ m2) (w1 ++ w2) f
@@ -179,14 +188,15 @@ transLH s (Proof def@(Def name dArgs body) sig) =
     args = map (transLHArg s) sigArgs
 
 transLHArg :: InternalState -> LHArg -> C.CoqArg
-transLHArg s (LHArg name ty reft) = (name, C.TExpr $ transType s ty, transProp s reft)
+transLHArg s (LHArg name ty reft) = (name, C.TExpr $ transType s ty, transProp (changeMode s (SpecRefArgMode name)) reft)
 
 transResLHArg :: InternalState -> LHArg -> C.Prop
 transResLHArg s (LHArg _ _ reft) = transProp s reft
 
 transType :: InternalState -> Type -> C.Expr
 transType _ (TVar tv) = C.Var tv
-transType s (TDat con tys) = C.App con $ map (transType s) tys
+transType s (TDat con []) = C.App con []
+transType s (TDat con tys) = trace ("Calling transType on application of parametric type "++con++" to the type arguments: "++unwords (map show tys)) C.App con $ map (transType s) tys
 transType s (Buildin b) = C.Buildin $ transBuildin b
 
 transFuncType :: InternalState -> [C.Type] -> C.Type -> C.Type
@@ -207,7 +217,7 @@ transExpr s (Case e b  bs) = if any (\(_, x) -> x `dependsOn` b) bs then match (
     match bO = C.Match (transExpr s e) bO bsT
 
 transExpr _ Unit            = C.Var "()"
-transExpr s (QMark e1 e2)   = C.App "(?)" $ map (transExpr s) [e1,e2]
+transExpr s (QMark e1 e2)   = undefined -- C.App "(?)" $ map (transExpr s) [e1,e2]
 
 transProof :: InternalState -> Expr -> [C.Tactic]
 transProof s (Term t) | mode s == DefProofMode = 
@@ -308,10 +318,10 @@ transEq :: InternalState -> LHExpr -> LHExpr -> C.Prop
 transEq s = transRel s Eq
 
 transProp :: InternalState -> LHExpr -> C.Prop
-transProp s (Brel rel e1 e2)       = transRel s rel e1 e2
+transProp s (Brel rel e1 e2)      = transRel s rel e1 e2
 transProp s (LHNeg form)          = C.Neg $ transProp s form
 transProp s (And es)              = C.And $ map (transProp s) es
-transProp s (Or es)              = C.Or $ map (transProp s) es
+transProp s (Or es)               = C.Or $ map (transProp s) es
 transProp s (LHIte c e e2)        = C.PExpr (C.Ite (transProp s c) (transLHExpr s e) (transLHExpr s e2))
 transProp s (LHApp f es)          = C.PExpr $ projectIfNeeded s (refineApply s f (map (transLHExpr s) es))
 transProp s (LHVar x)             = C.PExpr $ projectIfNeeded s (C.Var x)
@@ -521,12 +531,12 @@ data SourceContent = Import Id                        -- imported modules
   deriving Show
 
 instance Binder SourceContent where
-  name (Import id) = id
-  name (Alias id _) = id
-  name (Data id _ _) = id
-  name (Type id _) = id
-  name (Definition id _ _ _) = id
-  name (Theorem id _ _ _) = id
+  name (Import n) = n
+  name (Alias n _) = n
+  name (Data n _ _) = n
+  name (Type n _) = n
+  name (Definition n _ _ _) = n
+  name (Theorem n _ _ _) = n
 
 instance Eq SourceContent where 
   (==) expr expr2 = name expr == name expr2
@@ -551,8 +561,8 @@ orderSourceContent _ (Import id) (Import id2)                 = compare id id2
 orderSourceContent _ (Import _) _                             = LT
 orderSourceContent _ _ (Import _)                             = GT
 orderSourceContent _ srcCont srcCont2 | srcCont == srcCont2   = EQ
-orderSourceContent _ srcCont srcCont2 | dependsOn srcCont2 (name srcCont) = LT
-orderSourceContent _ srcCont srcCont2 | dependsOn srcCont (name srcCont2) = GT
+orderSourceContent _ srcCont srcCont2 | srcCont2 `dependsOn` name srcCont = LT
+orderSourceContent _ srcCont srcCont2 | srcCont `dependsOn` name srcCont2 = GT
 orderSourceContent idList (Alias n _) (Alias m _)             = appearsNoLater n m idList
 orderSourceContent _ Alias{} _ = LT
 orderSourceContent _ _ Alias{} = GT

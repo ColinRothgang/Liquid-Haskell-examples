@@ -66,10 +66,9 @@ run args = do
       isSubString l [] = False
       isSubString l@(hdL:tlL) (m@(h:tl)) = (hdL == h && isPrefix tlL tl) || isSubString l tl
 
-      printPositives = False
       consideredDependency = "geqN"
 
-      toPrint n x = "add_mono_r" `isSubString` show x -- n `isSubString` show x /= (x `dependsOn` n)-- && (not (x `dependsOn` n) || printPositives)
+      toPrint n x = (x `dependsOn` n) -- n `isSubString` show x /= (x `dependsOn` n)
 
     -- mapM_ (putStrLn . show) dataDecls --(putStrLn . (showSDocUnsafe . ppr)) dataDecls
     -- mapM_ (putStrLn . (showSDocUnsafe . ppr)) binds
@@ -78,9 +77,9 @@ run args = do
 
 
     -- mapM_ print lhDefs
-    mapM_ print parsedSource
+    -- mapM_ print parsedSource
 
-    -- mapM_ (\x -> print (show x++" `dependsOn` "++consideredDependency++": "++show (x `dependsOn` consideredDependency))) (filter (toPrint consideredDependency) parsedSource)
+    -- mapM_ (\x -> print (("The Declaration with name '"++name x++"' and with definition: \n")++show x++" `dependsOn` "++consideredDependency++": "++show (x `dependsOn` consideredDependency))) (filter (toPrint consideredDependency) parsedSource)
 
 
     putStrLn $ "\nThe translation to Coq yields: \n" ++ output
