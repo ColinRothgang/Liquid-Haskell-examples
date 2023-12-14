@@ -201,30 +201,30 @@ translateToCoq srcConts =
       renames = M.fromList [(name, unrefName)]
       runRename = flip runReader renames . renameExpr
       unrefinedBody = runRename body
-      coqArgs = map (transLHArg s) args
+      coqArgs = transLHArgs s args
       unrefName = C.unrefinedName name
-      unrefRet = let (n, typ, p) = transLHArg s retrf in (n, typ, C.removeEqSelfRef n p)
-      unrefDefState = State [(unrefName, coqArgs, Left unrefRet)] [] [] [] DefProofMode
+      unrefRet = let (n, typ, p) = transLHArgStateless (changeMode s (appendRefArgs (mode s) coqArgs)) retrf in (n, typ, C.removeEqSelfRef n p)
+      unrefDefState = State [(unrefName, coqArgs, Left unrefRet)] [] [] [] (DefProofMode coqArgs)
       definModeS = s `concatState` unrefDefState
       coqDefinien = transformTop definModeS (Def unrefName argNames unrefinedBody)
       unrefinedDef = C.SpecDef unrefName coqArgs unrefRet coqDefinien
 
-      defnState = definModeS `concatState` definitionModeState
+      defnState = definModeS `concatState` specModeState
       unrefAppl = refineApplyArg defnState unrefName coqArgs
       unrefApply = LH.projectIfNeeded defnState unrefAppl
       postRef = C.Brel C.Eq unrefApply (LH.projectIfNeeded defnState $ C.Var resId)
       refRet = let (resId, typ, _) = unrefRet in (resId, typ, postRef)
-      refDefState = State [(name, coqArgs, Left refRet)] [] [] [] DefinitionSpecMode
+      refDefState = State [(name, coqArgs, Left refRet)] [] [] [] defaultMode
       refinedDef = C.RefDef name coqArgs refRet (C.fromSpecs [(unrefName, coqArgs, Left unrefRet), (name, coqArgs, Left refRet)])
     in Result (unrefDefState `concatState`  refDefState, map C.DefinitionDeclaration [unrefinedDef, refinedDef])
   translate (Result (s,Theorem name args lhClaim body)) = 
     let
       argNames = map (\(LHArg n _ _) -> n) args 
-      coqArgs = map (transLHArg s) args
-      claimTransState = s `concatState` State [(name, coqArgs, Right C.TT)] [] [] [] DefinitionMode
+      coqArgs = transLHArgs s args
+      claimTransState = s `concatState` State [(name, coqArgs, Right C.TT)] [] [] [] (SpecMode coqArgs Nothing)
       claim = transProp claimTransState lhClaim
-      prfState = State [(name, coqArgs, Right claim)] [] [] [] ProofMode
+      prfState = State [(name, coqArgs, Right claim)] [] [] [] (ProofMode coqArgs)
       proofModeS = s `concatState` prfState
       tacs = transformTop proofModeS (Def name argNames body)
       thm = C.Theorem name coqArgs claim tacs
-    in Result (prfState `concatState` definitionModeState, [C.TheoremDeclaration thm])
+    in Result (prfState `concatState` specModeState, [C.TheoremDeclaration thm])

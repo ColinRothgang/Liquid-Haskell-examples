@@ -75,26 +75,42 @@ data BuildInTps = Integer | Boolean | Double deriving Show
 data LHArg = LHArg { lhArgName :: Id, lhArgType :: Type, lhArgReft :: LHExpr} deriving Show
 data Signature = Signature {sigArgs :: [LHArg], sigRes :: LHArg} deriving Show
 
--- DefinitionMode is default, should probably not be used anymore
--- DefinitionSpecMode is used during translation of specs (when (refined) variables to the definition/theorem aren't yet destructed)
--- SpecRefArgMode is used during translation of refinement of an arg in specs (when the variables' refinements aren't yet destructed, but the current one isn't yet refined)
+-- the default state, SpecMode is used during translation of specs (when (refined) variables to the definition/theorem aren't yet destructed),
+-- the optional argument is set during translation of the refinement of an argument (which within this translation is thus not yet refined
 -- ProofMode is used during proofs of theorems
--- DefProofMode is used in translation of definiens of "_unrefined" declarations
-data TranslationMode = DefinitionMode | DefinitionSpecMode | SpecRefArgMode Id | ProofMode | DefProofMode deriving (Eq, Show)
+-- DefProofMode is used in translation of definiens of "_unrefined" declarations, yields different proof translation in leafs of proof tree, 
+--   as we are constructing term not discharging (Prop kinded) proof obligation, so we use translate to smt_now refine ... instead of smt_now smt_app ...
+data TranslationMode = 
+    SpecMode [C.CoqArg] (Maybe (Id, C.Type))
+  | ProofMode [C.CoqArg]
+  | DefProofMode [C.CoqArg] deriving (Eq, Show)
+
+-- used outside of proofs, when no arguments are translated yet
+defaultMode = SpecMode [] Nothing
+
+getBoundVarRefs :: TranslationMode -> ([C.CoqArg], [(Id, C.Type)])
+getBoundVarRefs = undefined
+
+appendRefArgs :: TranslationMode -> [C.CoqArg] -> TranslationMode
+appendRefArgs (SpecMode args arg) moreArgs = SpecMode (args ++ moreArgs) arg 
+appendRefArgs (ProofMode args) moreArgs = ProofMode (args ++ moreArgs) 
+appendRefArgs (DefProofMode args) moreArgs = DefProofMode (args ++ moreArgs) 
+
 data InternalState = State {specs:: [(Id, [C.CoqArg], Either C.CoqArg C.Prop)], datatypeConstrs :: [Id], datatypeMeasures:: [(Id, Id)], warnings :: [String], mode :: TranslationMode} deriving Show
 defSpecs :: InternalState -> [(Id, [C.CoqArg], C.CoqArg)]
 defSpecs (State specs _ _ _ _) = mapMaybe (\(x, y, e) -> (x,y,) <$> leftToMaybe e) specs
 thmSpecs :: InternalState -> [(Id, [C.CoqArg], C.Prop)]
 thmSpecs (State specs _ _ _ _) = mapMaybe (\(x, y, e) -> (x,y,) <$> rightToMaybe e) specs
 emptyState :: InternalState
-emptyState = State [] [] [] [] DefinitionMode
-
+emptyState = State [] [] [] [] defaultMode
 changeMode :: InternalState -> TranslationMode -> InternalState
 changeMode s = State (specs s) (datatypeConstrs s) (datatypeMeasures s) (warnings s)
 
 toLookupState :: InternalState -> C.LookupState
-toLookupState s = C.State (specs s) (datatypeConstrs s) (isDefnMode (mode s)) ((\s -> isDefnMode s && s /= DefinitionMode)  (mode s)) ((\m -> case m of SpecRefArgMode arg -> Just arg; _ -> Nothing) (mode s)) where
-  isDefnMode m = m /= ProofMode && m /= DefProofMode
+toLookupState s = C.State (specs s) (datatypeConstrs s) (isDefnMode (mode s)) ((\m -> case m of SpecMode _ argO -> maybeToList argO; _ -> []) (mode s)) where
+  isDefnMode (ProofMode _) = False
+  isDefnMode (DefProofMode _) = False
+  isDefnMode _ = True
 
 concatState :: InternalState -> InternalState -> InternalState
 concatState (State sps cs m1 w1 _) (State sps2 cs2 m2 w2 f)= State (sps ++ sps2) (cs ++ cs2) (m1 ++ m2) (w1 ++ w2) f
@@ -112,15 +128,9 @@ instance Monad StateResult where
     (Result (fState, fRes)) = statefulF x
 
 registerDataDefSpecs :: Id -> [C.CoqArg] -> C.CoqArg -> StateResult ()
-registerDataDefSpecs name args ret = Result (State [(name, args, Left ret)] [name] [] [] DefinitionMode, ())
+registerDataDefSpecs name args ret = Result (State [(name, args, Left ret)] [name] [] [] defaultMode, ())
 
-registerThmSpecs :: Id -> [C.CoqArg] -> C.Prop -> StateResult ()
-registerThmSpecs name args claim = Result (State [(name, args, Right claim)] [] [] [] ProofMode, ())
-
-definitionModeState = State [] [] [] [] DefinitionSpecMode
-registerDefinitionMode = Result (definitionModeState, ())
-registerProofMode = Result (State [] [] [] [] ProofMode, ())
-registerDefProofMode = Result (State [] [] [] [] DefProofMode, ())
+specModeState = State [] [] [] [] defaultMode
 
 renameSigArgs :: [Id] -> Signature -> Signature
 renameSigArgs args (Signature sArgs res) =
@@ -182,13 +192,25 @@ refineApplyLH s id args = refineApply s id $ map (transLHExpr s) args
 
 transLH :: InternalState -> Proof -> C.Theorem
 transLH s (Proof def@(Def name dArgs body) sig) =
-    C.Theorem name args (transResLHArg s res) (transformTop s def)
+    C.Theorem name (transLHArgs s sigArgs) (transResLHArg s res) (transformTop s def)
   where
     Signature sigArgs res = renameSigArgs dArgs sig
-    args = map (transLHArg s) sigArgs
 
-transLHArg :: InternalState -> LHArg -> C.CoqArg
-transLHArg s (LHArg name ty reft) = (name, C.TExpr $ transType s ty, transProp (changeMode s (SpecRefArgMode name)) reft)
+
+transLHArgStateless :: InternalState -> LHArg -> C.CoqArg
+transLHArgStateless s (LHArg name ty reft) = (name, C.TExpr $ transType s ty, transProp s reft)
+
+transLHArg :: InternalState -> LHArg -> StateResult C.CoqArg
+transLHArg s (LHArg name ty reft) = Result (newState, (name, tpT, transProp newState reft)) where
+  tpT = C.TExpr $ transType s ty
+  (previousArgs, _) = getBoundVarRefs (mode s)
+  newState = changeMode s $ SpecMode previousArgs (Just (name, tpT))
+
+transLHArgs :: InternalState -> [LHArg] -> [C.CoqArg]
+transLHArgs s args = coqArgs where
+    scanner :: StateResult [C.CoqArg] -> LHArg -> StateResult [C.CoqArg]
+    scanner acc@(Result (s, previousArgs)) arg = acc >>= \prev -> (++) prev . (: []) <$> transLHArg s arg
+    Result (_, coqArgs) = foldl scanner (Result (s, [])) args
 
 transResLHArg :: InternalState -> LHArg -> C.Prop
 transResLHArg s (LHArg _ _ reft) = transProp s reft
@@ -220,7 +242,7 @@ transExpr _ Unit            = C.Var "()"
 transExpr s (QMark e1 e2)   = undefined -- C.App "(?)" $ map (transExpr s) [e1,e2]
 
 transProof :: InternalState -> Expr -> [C.Tactic]
-transProof s (Term t) | mode s == DefProofMode = 
+transProof s (Term t) | case mode s of DefProofMode _ -> True; _ -> False = 
   let
     tm = transLHExpr s t
     ls = toLookupState s

@@ -80,12 +80,12 @@ useAppSub = False
 printRef :: Prop-> Bool
 printRef p = printTrivial || not (isTrivial p) 
 
-data LookupState = State {specs :: [(Id, [CoqArg], Either CoqArg Prop)], datatypeConstrs :: [Id], isDefnMode:: Bool, isDefnSpecMode ::Bool, getSpecArg:: Maybe Id}
+data LookupState = State {specs :: [(Id, [CoqArg], Either CoqArg Prop)], datatypeConstrs :: [Id], isSpecMode ::Bool, destrArgs:: [(Id, Type)]}
 defSpecs :: LookupState -> [(Id, [CoqArg], CoqArg)]
 defSpecs s = mapMaybe (\(x, y, e) -> (x,y,) <$> leftToMaybe e) $ specs s
 
 fromSpecs :: [(Id, [CoqArg], Either CoqArg Prop)] -> LookupState
-fromSpecs specs = State specs [] False False Nothing
+fromSpecs specs = State specs [] True []
 
 getRefinementsLastSpec :: LookupState -> [(Id, Prop)]
 getRefinementsLastSpec s = maybe [] getRefinementsCoqArg (leftToMaybe r) where
@@ -118,7 +118,7 @@ getRefinementsExpr s _ exp@(App n _) | isJust (find ((== n) . fst3) $ defSpecs s
     (_, _, coqArg) = funSpec
   in getRefinementsCoqArg coqArg
 getRefinementsExpr s _ exp@(Var v) | v `elem` datatypeConstrs s = []
-getRefinementsExpr s _ exp@(Var v) | Just v == getSpecArg s = []
+getRefinementsExpr s _ exp@(Var v) | any ((==) v . fst) $ destrArgs s = []
 getRefinementsExpr s _ exp@(Var v@('I':'H':_)) = getRefinementsLastSpec s
 getRefinementsExpr s "" exp@Var{} = getRefinementsExpr s (fst3 $ (last . specs) s) exp
 getRefinementsExpr s n exp@(Var v) = 
@@ -131,7 +131,7 @@ getRefinementsExpr s n exp@(Var v) =
     Nothing -> {-trace (show v++" is not an argument to function "++n++" with funcSpec "++show funcSpec)-} []
     -- if in proof mode, we know that any subset typed argument has long been destructed by now
     Just arg -> 
-      if isDefnMode s then getRefinementsCoqArg arg else []
+      if isSpecMode s then getRefinementsCoqArg arg else []
 getRefinementsExpr s n e = case e of
   Ite _ expr _ -> getRefinementsExpr s n expr
   Match _ _ patExprs -> getRefinementsExpr s n $ (snd . head) patExprs
@@ -259,7 +259,7 @@ castInto s tm refinements expectedTyp =
     -- drop the accompanying base (expected) types
     expectedTypsStripped = drop (length zippedRefs - length zippedRefsStripped) expectedTyps
     (subsumptionRefs, projInjRefs) = break (\(x,y) -> isNothing x || isNothing y) zippedRefsStripped
-    inject (Just (n, ref), Nothing) typ tm = Inject (RExpr n typ ref) tm (if isDefnSpecMode s && ref == TT then Just (ProofTerm "I") else Nothing)
+    inject (Just (n, ref), Nothing) typ tm = Inject (RExpr n typ ref) tm (if isSpecMode s && ref == TT then Just (ProofTerm "I") else Nothing)
     injectionsRev = zipWith inject projInjRefs expectedTypsStripped
     (projections, injections) = if isNothing (fst =<< safeHead projInjRefs) then (map (const Project) projInjRefs, []) else ([], reverse injectionsRev)
     subsumptions = subsumptionCasts s (reverse $ zip (map (bimap fromJust fromJust) subsumptionRefs) (take (length subsumptionRefs) expectedTypsStripped))
@@ -269,7 +269,7 @@ castInto s tm refinements expectedTyp =
 
 refineApplyGeneric :: Show a => LookupState -> (a -> Expr) -> (LookupState -> Id -> a -> [(Id, Prop)]) -> Id -> [a] -> Expr
 refineApplyGeneric s transTm getRefs f args = {- trace ("Calling refineApplyGeneric with specs "++ show allSpecs ++ " on: " ++ show (App f (map transTm args))) $ -} 
-  if useAppSub && not (isDefnMode s) then applySubs f (map transTm args) else App f (zipWith cast args [0..])
+  if useAppSub && not (isSpecMode s) then applySubs f (map transTm args) else App f (zipWith cast args [0..])
   where
   allSpecs = specs s
   lookupArgTyp :: Maybe [CoqArg]
@@ -393,7 +393,7 @@ injectArgument :: CoqArg -> Expr
 injectArgument (name, typ, reft) = Inject typ (Var name) Nothing
 
 subsumptionCast :: LookupState -> Type  -> (Id, Prop) -> (Id, Prop) -> Expr -> Expr
-subsumptionCast s typ need@(_, needRef) have tm = SubCast typ need have tm (if isDefnSpecMode s && isTrivial needRef then Just $ ProofTerm "I" else Nothing)
+subsumptionCast s typ need@(_, needRef) have tm = SubCast typ need have tm (if isSpecMode s && isTrivial needRef then Just $ ProofTerm "I" else Nothing)
 
 appSub :: Expr -> Expr -> Expr
 appSub = Bop AppSub
