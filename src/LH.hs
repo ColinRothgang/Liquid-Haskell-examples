@@ -81,20 +81,32 @@ data Signature = Signature {sigArgs :: [LHArg], sigRes :: LHArg} deriving Show
 -- DefProofMode is used in translation of definiens of "_unrefined" declarations, yields different proof translation in leafs of proof tree, 
 --   as we are constructing term not discharging (Prop kinded) proof obligation, so we use translate to smt_now refine ... instead of smt_now smt_app ...
 data TranslationMode = 
-    SpecMode [C.CoqArg] (Maybe (Id, C.Type))
-  | ProofMode [C.CoqArg]
-  | DefProofMode [C.CoqArg] deriving (Eq, Show)
+    SpecMode [C.CoqArg] (Maybe (C.CoqArg, (Id, Id)))
+  | ProofMode [C.CoqArg] [(C.CoqArg, (Id, Id))]
+  | DefProofMode [C.CoqArg] [(C.CoqArg, (Id, Id))] deriving (Eq, Show)
 
 -- used outside of proofs, when no arguments are translated yet
 defaultMode = SpecMode [] Nothing
 
-getBoundVarRefs :: TranslationMode -> ([C.CoqArg], [(Id, C.Type)])
-getBoundVarRefs = undefined
+getBoundVarRefs :: TranslationMode -> ([C.CoqArg], [(C.CoqArg, (Id, Id))])
+getBoundVarRefs (ProofMode undestrArgs destrArgs) = (undestrArgs, [])
+getBoundVarRefs (DefProofMode undestrArgs destrArgs) = (undestrArgs, [])
+getBoundVarRefs (SpecMode undestrArgs destrArgsO) = (undestrArgs, maybeToList destrArgsO)
 
 appendRefArgs :: TranslationMode -> [C.CoqArg] -> TranslationMode
 appendRefArgs (SpecMode args arg) moreArgs = SpecMode (args ++ moreArgs) arg 
-appendRefArgs (ProofMode args) moreArgs = ProofMode (args ++ moreArgs) 
-appendRefArgs (DefProofMode args) moreArgs = DefProofMode (args ++ moreArgs) 
+appendRefArgs (ProofMode args destrArgs) moreArgs = ProofMode (args ++ moreArgs) destrArgs 
+appendRefArgs (DefProofMode args destrArgs) moreArgs = DefProofMode (args ++ moreArgs) destrArgs
+
+removeArgM :: TranslationMode -> Id -> TranslationMode
+removeArgM m n = 
+  case m of
+    (SpecMode args arg) -> SpecMode (filter toKeepArgs args) ((\x -> if toKeepDestrArg x then Just x else Nothing) =<< arg)
+    (ProofMode args destrArgs) -> ProofMode (filter toKeepArgs args) (filter toKeepDestrArg destrArgs)
+    (DefProofMode args destrArgs) -> DefProofMode (filter toKeepArgs args) (filter toKeepDestrArg destrArgs)
+    where
+      toKeepArgs = (/=) n . fst3
+      toKeepDestrArg ((m, _, _), (o, _)) = n /= m && n /= o
 
 data InternalState = State {specs:: [(Id, [C.CoqArg], Either C.CoqArg C.Prop)], datatypeConstrs :: [Id], datatypeMeasures:: [(Id, Id)], warnings :: [String], mode :: TranslationMode} deriving Show
 defSpecs :: InternalState -> [(Id, [C.CoqArg], C.CoqArg)]
@@ -106,11 +118,15 @@ emptyState = State [] [] [] [] defaultMode
 changeMode :: InternalState -> TranslationMode -> InternalState
 changeMode s = State (specs s) (datatypeConstrs s) (datatypeMeasures s) (warnings s)
 
+removeArg :: InternalState -> Id -> InternalState
+removeArg s n = changeMode s (removeArgM (mode s) n)
+
 toLookupState :: InternalState -> C.LookupState
-toLookupState s = C.State (specs s) (datatypeConstrs s) (isDefnMode (mode s)) ((\m -> case m of SpecMode _ argO -> maybeToList argO; _ -> []) (mode s)) where
-  isDefnMode (ProofMode _) = False
-  isDefnMode (DefProofMode _) = False
+toLookupState s = C.State (specs s) (datatypeConstrs s) (isDefnMode (mode s)) undestrArgs destrArgs where
+  isDefnMode (ProofMode _ _) = False
+  isDefnMode (DefProofMode _ _) = False
   isDefnMode _ = True
+  (undestrArgs, destrArgs) = getBoundVarRefs (mode s)
 
 concatState :: InternalState -> InternalState -> InternalState
 concatState (State sps cs m1 w1 _) (State sps2 cs2 m2 w2 f)= State (sps ++ sps2) (cs ++ cs2) (m1 ++ m2) (w1 ++ w2) f
@@ -201,10 +217,15 @@ transLHArgStateless :: InternalState -> LHArg -> C.CoqArg
 transLHArgStateless s (LHArg name ty reft) = (name, C.TExpr $ transType s ty, transProp s reft)
 
 transLHArg :: InternalState -> LHArg -> StateResult C.CoqArg
-transLHArg s (LHArg name ty reft) = Result (newState, (name, tpT, transProp newState reft)) where
+transLHArg s (LHArg name ty reft) = Result (newState, (name, tpT, refT)) where
   tpT = C.TExpr $ transType s ty
   (previousArgs, _) = getBoundVarRefs (mode s)
-  newState = changeMode s $ SpecMode previousArgs (Just (name, tpT))
+  destrIds = (name, C.refWitnessName name)
+  -- used only for translating the refinement itself
+  -- as this translation is independent of the refinement of the current arg using tempState is OK there
+  tempState = changeMode s $ SpecMode previousArgs (Just ((name, tpT, C.TT), destrIds))
+  refT = transProp tempState reft
+  newState = changeMode s $ SpecMode previousArgs (Just ((name, tpT, refT), destrIds))
 
 transLHArgs :: InternalState -> [LHArg] -> [C.CoqArg]
 transLHArgs s args = coqArgs where
@@ -242,7 +263,7 @@ transExpr _ Unit            = C.Var "()"
 transExpr s (QMark e1 e2)   = undefined -- C.App "(?)" $ map (transExpr s) [e1,e2]
 
 transProof :: InternalState -> Expr -> [C.Tactic]
-transProof s (Term t) | case mode s of DefProofMode _ -> True; _ -> False = 
+transProof s (Term t) | case mode s of DefProofMode _ _ -> True; _ -> False = 
   let
     tm = transLHExpr s t
     ls = toLookupState s
@@ -251,7 +272,7 @@ transProof s (Term t) | case mode s of DefProofMode _ -> True; _ -> False =
     refinements = transRef $ C.getRefinementsExpr ls "" tm -- not argument to function application, so giving "" meaning id of current definition/thm
     expectedTyp = (thd3 . last) (defSpecs s)
     castTerm = C.castInto ls tm refinements $ Left expectedTyp
-  in [C.Exact castTerm]
+  in [C.Refine castTerm]
 transProof s (Term (LHVar "trivial")) = transProof s Unit
 transProof s (Term (LHApp f es)) = C.Apply (refineApply s f (map (transExpr s) es')): concatMap (transProof s) ps
     where
@@ -376,7 +397,7 @@ checkInductiveCall indVars (_:args) = checkInductiveCall indVars args
 transformTop :: InternalState -> Def -> [C.Tactic]
 transformTop s def@(Def name args e) =
     case runReader (transformInductive s e) env of
-      Nothing        -> transBranch s e
+      Nothing        -> transBranch s Nothing (Nothing, e)
       Just (arg, e') -> transIndDef s (Def name args e') arg
   where
     env = Env name (M.fromList $ zip args [0..]) M.empty
@@ -469,8 +490,8 @@ transformInductive s eqn@(Eqn expr lstHints lstTm) =
 transformInductive _ _ = return Nothing
 
 transIndDef :: InternalState -> Def -> Arg -> [C.Tactic]
-transIndDef s (Def name args (Case (Term (LHVar ind)) _ [(_,e1), (_,e2)])) (pos, indVar) =
-    [induction [transBranch s e1, transBranch s e2]]
+transIndDef s (Def name args (Case (Term (LHVar ind)) _ branches)) (pos, indVar) =
+    [induction (map (transBranch s (Just ind)) (map (\(x,y) -> (Just x, y)) branches))]
   where
     -- subst = M.fromList [(indArg, indArg++"_rememberedI")]
     -- [e1T, e2T] = map (flip runReader subst . renameExpr) [e1, e2]
@@ -481,9 +502,12 @@ transIndDef s (Def name args (Case (Term (LHVar ind)) _ [(_,e1), (_,e2)])) (pos,
     induction = C.simplInduction indArg indVar indHyp
 transIndDef _ def _ = error $ "unhandled proof case of " ++ show def
 
-transBranch :: InternalState -> Expr -> [C.Tactic]
-transBranch s e = [C.Subgoal (updateLast C.toSolve (transProof s e))]
-
+transBranch :: InternalState -> Maybe Id -> (Maybe Pat, Expr) -> [C.Tactic]
+transBranch s (Just indVar) (Just (Pat con args), e) = [C.Subgoal (updateLast C.toSolve (transProof (changeMode s newMode) e))] where
+  keepIndVar = indVar `elem` con:args
+  oldMode = mode s
+  newMode = if keepIndVar then oldMode else removeArgM oldMode indVar
+transBranch s _ (_, e) = [C.Subgoal (updateLast C.toSolve (transProof s e))]
 
 -- intermediate representation of LH source
 

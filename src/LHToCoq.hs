@@ -204,7 +204,7 @@ translateToCoq srcConts =
       coqArgs = transLHArgs s args
       unrefName = C.unrefinedName name
       unrefRet = let (n, typ, p) = transLHArgStateless (changeMode s (appendRefArgs (mode s) coqArgs)) retrf in (n, typ, C.removeEqSelfRef n p)
-      unrefDefState = State [(unrefName, coqArgs, Left unrefRet)] [] [] [] (DefProofMode coqArgs)
+      unrefDefState = State [(unrefName, coqArgs, Left unrefRet)] [] [] [] (DefProofMode coqArgs [])
       definModeS = s `concatState` unrefDefState
       coqDefinien = transformTop definModeS (Def unrefName argNames unrefinedBody)
       unrefinedDef = C.SpecDef unrefName coqArgs unrefRet coqDefinien
@@ -215,7 +215,10 @@ translateToCoq srcConts =
       postRef = C.Brel C.Eq unrefApply (LH.projectIfNeeded defnState $ C.Var resId)
       refRet = let (resId, typ, _) = unrefRet in (resId, typ, postRef)
       refDefState = State [(name, coqArgs, Left refRet)] [] [] [] defaultMode
-      refinedDef = C.RefDef name coqArgs refRet (C.fromSpecs [(unrefName, coqArgs, Left unrefRet), (name, coqArgs, Left refRet)])
+      specs = [(unrefName, coqArgs, Left unrefRet), (name, coqArgs, Left refRet)]
+      destrArgs = map (\arg@(n,_,_) -> (arg,(n, C.refWitnessName n))) coqArgs
+      bodyTransState = C.State specs [] True [] destrArgs
+      refinedDef = C.RefDef name coqArgs refRet bodyTransState
     in Result (unrefDefState `concatState`  refDefState, map C.DefinitionDeclaration [unrefinedDef, refinedDef])
   translate (Result (s,Theorem name args lhClaim body)) = 
     let
@@ -223,7 +226,7 @@ translateToCoq srcConts =
       coqArgs = transLHArgs s args
       claimTransState = s `concatState` State [(name, coqArgs, Right C.TT)] [] [] [] (SpecMode coqArgs Nothing)
       claim = transProp claimTransState lhClaim
-      prfState = State [(name, coqArgs, Right claim)] [] [] [] (ProofMode coqArgs)
+      prfState = State [(name, coqArgs, Right claim)] [] [] [] (ProofMode coqArgs [])
       proofModeS = s `concatState` prfState
       tacs = transformTop proofModeS (Def name argNames body)
       thm = C.Theorem name coqArgs claim tacs

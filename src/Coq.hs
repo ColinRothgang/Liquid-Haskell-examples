@@ -22,24 +22,92 @@ type CoqArg = (Id, Type, Prop)
 triviallyRefinedArg :: Id -> Type -> CoqArg
 triviallyRefinedArg n typ = (n, typ, TT)
 
+showSpecDefn :: Id -> [CoqArg] -> Either CoqArg Prop -> [Tactic] -> String
+showSpecDefn name args resTp prf = 
+  "Definition "++ name ++"_spec: "++typeOrProp++". \nProof. "
+  ++ "smt_now "++dropWhile isSpace (show (Refine (forallTP args resTp)))
+  ++ "\nDefined.\n"
+  ++ defOrThm ++ " " ++ name ++ ": " ++ name++"_spec." ++ "\n"
+  ++ "Proof.\n  "
+  ++ introsArgs args
+  ++ destructArgs args
+  ++ intercalate "" (map show prf) ++ "\n"
+  ++ qedOrDefined ++ ".\n" where
+    isTyped = isLeft resTp
+    (typeOrProp, defOrThm, qedOrDefined) = if isTyped then ("Type", "Definition", "Defined") else ("Prop", "Theorem", "Qed")
+    introsArgs :: [(Id, b, c)] -> String
+    introsArgs args = intercalate "" $ map (((show . Intros) . flip (:) []). fst3) args
+    destructArgs args = 
+      let destructs = unwords (map destructSubsetArgIfNeeded args) in
+      if all isSpace destructs then "" else destructs ++ "\n  "
+
+forallTP :: [CoqArg] -> Either CoqArg Prop -> Expr
+forallTP args body = either (flip ForallT) (flip Forall) body $ map (\(n,t,r) -> (n,Just (RExpr n t r))) args
+
 data Theorem = Theorem {cpName :: Id, cpArgs :: [CoqArg], cpType :: Prop, cpbody :: [Tactic]}
 instance Show Theorem where
-  show (Theorem name args ty bod) =
-    "Definition "++ name ++"_spec: Prop. \nProof. "
-    ++ "smt_now "++dropWhile isSpace (show (Exact (Forall (map (\(n,t,r) -> (n,Just (RExpr n t r))) args) ty)))
-    ++ "\nDefined.\n"
-    ++ "Theorem " ++ name ++ ": " ++ name++"_spec." ++ "\n"
-    ++ "Proof.\n  "
-    ++ introsArgs args
-    ++ destructArgs args
-    ++ intercalate "" (map show bod) ++ "\n"
-    ++ "Qed.\n"
-    where 
-      introsArgs :: [(Id, b, c)] -> String
-      introsArgs args = intercalate "" $ map (((show . Intros) . flip (:) []). fst3) args
-      destructArgs args = 
-        let destructs = unwords (map destructSubsetArgIfNeeded args) in
-        if all isSpace destructs then "" else destructs ++ "\n  "
+  show (Theorem name args ty tacs) = showSpecDefn name args (Right ty) tacs
+
+{- 
+Defs correspond to LH definitions without specs
+SpecDefs correspond to the "_unrefined" definitions (with same refinements as given in Lh source)
+RefDefs correspond to the refined definitions (defined as the (subsumption cast) unrefined one) but with singleton refinement return type
+-}
+data Def = 
+    Def {defName :: Id, defArgs:: [Id], defBody :: Expr} 
+  | SpecDef {sdefNAme :: Id, sdefArgs :: [CoqArg], sdefRet :: CoqArg, sdefBody :: [Tactic]} 
+  | RefDef {name :: Id, args:: [CoqArg], ret:: CoqArg, state :: LookupState}
+instance Show Def where
+  show (Def name args body) =
+    "Fixpoint " ++ name ++ " " ++ unwords args ++ " :=\n"
+    ++ "  " ++ show body ++ ".\n"
+  show (SpecDef name args retft tacs) = showSpecDefn name args (Left retft) tacs
+  show (RefDef name args retft state) = showSpecDefn name args (Left retft) tacs where
+      unrefName = unrefinedName name
+      getRefinementsDestructedArgs coqArg@(n, _, _) = if any ((== n) . fst3) args then [] else getRefinementsCoqArg coqArg
+      unrefinedApply = refineApplyGeneric state (Var . fst3) (\_ _ -> getRefinementsDestructedArgs) unrefName args
+      unrefRet@(n, t, ref) = case thd3 <$> find ((== name) . fst3)  (specs state) of
+        Just (Left coqArg) -> coqArg
+        _ -> error ("No type spec found for "++unrefName++".")
+      reCastUnrefRet = reprocessRef state Nothing ref
+      unrefRetReprocessed = (n, t, reCastUnrefRet)
+      unrefApplSubsetTp = isSubsetTermCoqArg (n, t, reCastUnrefRet)
+      unrefApplProj = if unrefApplSubsetTp then Project unrefinedApply else unrefinedApply
+      unrefApplCast = Inject (uncurry3 RExpr unrefRetReprocessed) unrefApplProj (Just $ ProofTerm "eq_refl")
+      tacs = [Now (Refine unrefApplCast)]
+
+
+data Constant = Const {constId :: Id, body :: Expr}
+instance Show Constant where
+  show (Const name body) = "Definition " ++ name ++ " := "++ show body ++ ". "
+
+newtype Load = Load {moduleName :: Id}
+instance Show Load where
+  show (Load name) = "Load " ++ name ++ ". "
+
+data NewType = NewType {typeName :: Id, defin :: Type}
+instance Show NewType where
+  show (NewType name def) = "Notation " ++ name ++ ":= " ++ show def ++ ". "
+
+data Inductive = Inductive {typeId :: Id, constructors :: [(Id, Type)]}
+instance Show Inductive where
+  show (Inductive typeId constrs) = inductiveDecl where
+    showBranch (n, typ) = n ++ ": " ++ show typ
+    inductiveDecl = "Inductive " ++ typeId ++ ": Set := " ++ intercalate " | " (map showBranch constrs) ++ ". "
+
+data CoqContent = LoadDeclaration Load 
+                | ConstantDeclaration Constant
+                | TypeDeclaration NewType
+                | InductiveDeclaration Inductive
+                | DefinitionDeclaration Def
+                | TheoremDeclaration Theorem
+instance Show CoqContent where
+  show (LoadDeclaration l)        = show l
+  show (ConstantDeclaration c)    = show c
+  show (TypeDeclaration t)        = show t
+  show (InductiveDeclaration ind) = show ind
+  show (DefinitionDeclaration d)  = show d
+  show (TheoremDeclaration thm)   = show thm
 
 -- data Proof = IndProof {bod :: ProofBod  , proofIndArg :: (Id,Int)} | NIndProof {bod :: PrBod}
 showArg :: CoqArg -> String
@@ -62,6 +130,9 @@ showArgId (n, _, _) = n
 unrefinedName :: Id -> Id
 unrefinedName s = s ++ "_unrefined"
 
+refWitnessName :: Id -> Id
+refWitnessName n = n++"p"
+
 injectIntoSubset :: Id -> String
 injectIntoSubset t = addParens $ "# "++ t
 
@@ -80,12 +151,12 @@ useAppSub = False
 printRef :: Prop-> Bool
 printRef p = printTrivial || not (isTrivial p) 
 
-data LookupState = State {specs :: [(Id, [CoqArg], Either CoqArg Prop)], datatypeConstrs :: [Id], isSpecMode ::Bool, destrArgs:: [(Id, Type)]}
+data LookupState = State {specs :: [(Id, [CoqArg], Either CoqArg Prop)], datatypeConstrs :: [Id], isSpecMode ::Bool, undestrArgs :: [CoqArg], destrArgs:: [((Id, Type, Prop), (Id, Id))]}
 defSpecs :: LookupState -> [(Id, [CoqArg], CoqArg)]
 defSpecs s = mapMaybe (\(x, y, e) -> (x,y,) <$> leftToMaybe e) $ specs s
 
 fromSpecs :: [(Id, [CoqArg], Either CoqArg Prop)] -> LookupState
-fromSpecs specs = State specs [] True []
+fromSpecs specs = State specs [] True [] []
 
 getRefinementsLastSpec :: LookupState -> [(Id, Prop)]
 getRefinementsLastSpec s = maybe [] getRefinementsCoqArg (leftToMaybe r) where
@@ -118,7 +189,7 @@ getRefinementsExpr s _ exp@(App n _) | isJust (find ((== n) . fst3) $ defSpecs s
     (_, _, coqArg) = funSpec
   in getRefinementsCoqArg coqArg
 getRefinementsExpr s _ exp@(Var v) | v `elem` datatypeConstrs s = []
-getRefinementsExpr s _ exp@(Var v) | any ((==) v . fst) $ destrArgs s = []
+getRefinementsExpr s _ exp@(Var v) | any ((==) v . (fst . snd)) $ destrArgs s = []
 getRefinementsExpr s _ exp@(Var v@('I':'H':_)) = getRefinementsLastSpec s
 getRefinementsExpr s "" exp@Var{} = getRefinementsExpr s (fst3 $ (last . specs) s) exp
 getRefinementsExpr s n exp@(Var v) = 
@@ -259,7 +330,15 @@ castInto s tm refinements expectedTyp =
     -- drop the accompanying base (expected) types
     expectedTypsStripped = drop (length zippedRefs - length zippedRefsStripped) expectedTyps
     (subsumptionRefs, projInjRefs) = break (\(x,y) -> isNothing x || isNothing y) zippedRefsStripped
-    inject (Just (n, ref), Nothing) typ tm = Inject (RExpr n typ ref) tm (if isSpecMode s && ref == TT then Just (ProofTerm "I") else Nothing)
+    inject (Just (n, ref), Nothing) typ tm = 
+      let 
+        prfO  | isJust destrArgO && destrRef == ref = Just $ ProofTerm destrPrf
+              | isSpecMode s && ref == TT = trace ("No proof terms known for variable "++n++" in context with corresponding destrArgO of "++show destrArgO) $ Just (ProofTerm "I")
+              | otherwise = Nothing
+              where
+                destrArgO = find ((==) n . (fst . snd)) (destrArgs s)
+                ((_, destrTp, destrRef), (destrNm, destrPrf)) = fromJust destrArgO
+      in Inject (RExpr n typ ref) tm prfO
     injectionsRev = zipWith inject projInjRefs expectedTypsStripped
     (projections, injections) = if isNothing (fst =<< safeHead projInjRefs) then (map (const Project) projInjRefs, []) else ([], reverse injectionsRev)
     subsumptions = subsumptionCasts s (reverse $ zip (map (bimap fromJust fromJust) subsumptionRefs) (take (length subsumptionRefs) expectedTypsStripped))
@@ -295,71 +374,6 @@ refineApplyGeneric s transTm getRefs f args = {- trace ("Calling refineApplyGene
     castInto s tm (getRefs s (fst3 $ last allSpecs) t) expected
   cast t i | not (hasSpec i) = transTm t -- error $ "No specs found for "++f++" found specs: \n"++show allSpecs -- if getRefs allSpecs f t then Project (transTm t) else transTm t
 
-data Def = Def {defName :: Id, defArgs:: [Id], defBody :: Expr} | SpecDef {sdefNAme :: Id, sdefArgs :: [CoqArg], sdefRet :: CoqArg, sdefBody :: [Tactic]} | RefDef {name :: Id, args:: [CoqArg], ret:: CoqArg, state :: LookupState}
-instance Show Def where
-  show (Def name args body) =
-    "Fixpoint " ++ name ++ " " ++ unwords args ++ " :=\n"
-    ++ "  " ++ show body ++ ".\n"
-  show (SpecDef name args retft tacs) = 
-    "Definition " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArgRes retft ++ ". \n"++ "Proof.\n  "
-    ++ destructArgs args
-    ++ intercalate "" (map show tacs) ++ "\n"
-    ++ "Defined.\n"
-    where 
-      destructArgs args = 
-        let destructs = unwords (map destructSubsetArgIfNeeded args) in
-        if all isSpace destructs then "" else destructs ++ "\n  "
-  show (RefDef name args retft state) = 
-    let
-      unrefName = unrefinedName name
-      getRefinementsDestructedArgs coqArg@(n, _, _) = if any ((== n) . fst3) args then [] else getRefinementsCoqArg coqArg
-      unrefinedApply = refineApplyGeneric state (Var . fst3) (\_ _ -> getRefinementsDestructedArgs) unrefName args
-      unrefRet = case thd3 <$> find ((== unrefName) . fst3)  (specs state) of
-        Just (Left coqArg) -> coqArg
-        _ -> error ("No type spec found for "++unrefName++".")
-      unrefApplSubsetTp = isSubsetTermCoqArg unrefRet
-      unrefRetft = let (n, typ, _) = retft in (n, typ, TT)
-      unrefApplCast = if unrefApplSubsetTp then Project unrefinedApply else unrefinedApply
-      destructs = unwords (map destructSubsetArgIfNeeded args)
-      retTp = uncurry3 RExpr retft 
-      refinedDefinien = "Proof.\n  " ++ (if all isSpace destructs then "" else destructs ++ "\n  ") ++ "smt_now refine " ++ addParens (injectUnrefAppl unrefApplCast) ++". \n" ++ "Defined.\n"
-      refinedDef = "Definition " ++ name ++ " " ++ unwords (map showArg args) ++ ": " ++ showArgRes retft ++ " .\n" ++ refinedDefinien
-    in refinedDef
-
-
-data Constant = Const {constId :: Id, body :: Expr}
-instance Show Constant where
-  show (Const name body) = "Definition " ++ name ++ " := "++ show body ++ ". "
-
-newtype Load = Load {moduleName :: Id}
-instance Show Load where
-  show (Load name) = "Load " ++ name ++ ". "
-
-data NewType = NewType {typeName :: Id, defin :: Type}
-instance Show NewType where
-  show (NewType name def) = "Notation " ++ name ++ ":= " ++ show def ++ ". "
-
-data Inductive = Inductive {typeId :: Id, constructors :: [(Id, Type)]}
-instance Show Inductive where
-  show (Inductive typeId constrs) = inductiveDecl where
-    showBranch (n, typ) = n ++ ": " ++ show typ
-    inductiveDecl = "Inductive " ++ typeId ++ ": Set := " ++ intercalate " | " (map showBranch constrs) ++ ". "
-
-data CoqContent = LoadDeclaration Load 
-                | ConstantDeclaration Constant
-                | TypeDeclaration NewType
-                | InductiveDeclaration Inductive
-                | DefinitionDeclaration Def
-                | TheoremDeclaration Theorem
-instance Show CoqContent where
-  show (LoadDeclaration l)        = show l
-  show (ConstantDeclaration c)    = show c
-  show (TypeDeclaration t)        = show t
-  show (InductiveDeclaration ind) = show ind
-  show (DefinitionDeclaration d)  = show d
-  show (TheoremDeclaration thm)   = show thm
-
-
 data Pat = Pat {patCon :: Id, patArgs :: [Id]} deriving Data
 
 instance Show Pat where
@@ -384,7 +398,8 @@ data Expr = App Id [Expr]
           | Buildin BuildInTps
           | TypArg Type
           | Lambda Id Type Expr
-          | Forall [(Id, Maybe Type)] Prop deriving Data
+          | Forall [(Id, Maybe Type)] Prop
+          | ForallT [(Id, Maybe Type)] CoqArg deriving Data
 
 injectTrivially :: Expr -> Expr
 injectTrivially expr = Inject Hole expr $ Just (ProofTerm "I")
@@ -420,7 +435,7 @@ instance Show Expr where
       showBranch (p, e) = "| " ++ show p ++ " => " ++ show e
   show (Ite cond thenE elseE) = "if "++ addParens (show cond) ++ " then "++addParens (show thenE)++" else "++addParens (show elseE)
   show (Inject (RExpr n (RExpr _ typ _) ref) x p) = show (Inject (RExpr n typ ref) x p)
-  -- show (Inject refTp@(RExpr n typ TT) tm Nothing) = show (Inject refTp tm (Just $ ProofTerm "I")) -- ++". try "++show (Exact (Lambda n typ (ProofTerm "I")))
+  -- show (Inject refTp@(RExpr n typ TT) tm Nothing) = show (Inject refTp tm (Just $ ProofTerm "I")) -- ++". try "++show (Refine (Lambda n typ (ProofTerm "I")))
   -- show (Inject refTp@(RExpr n typ TT) tm Nothing) = injectIntoSubset $ addParens (show tm) -- addParens $ unwords ("injectionCast":[show typ, addParens $ show (Lambda n typ (EProp TT)), (show . Lambda n typ) (ProofTerm "I"), addParens $ show tm])
   show (Inject refTp@(RExpr n typ ref) tm p) =  
     addParens $ unwords ("injectionCast":[show typ, addParens $ show (Lambda n typ (EProp ref)), addParens $ show tm, maybe "_" show p])
@@ -439,6 +454,8 @@ instance Show Expr where
   show (TypArg t) = show t
   show (Lambda n typ body) = addParens $ "fun "++n++": "++show typ++" => "++show body
   show (Forall args body) = addParens $ "forall "++unwords (map (\(n, typ)->addParens $ n ++ maybe "" ((++) ":" . show) typ) args)++", "++show body
+  show (ForallT args ret) = addParens $ "forall "++unwords (map (\(n, typ)->addParens $ n ++ maybe "" ((++) ":" . show) typ) args)++", "++showArgRes ret
+  show t = error $ "unexpected Coq expression: "++show (toConstr t)
 
 instance Eq Expr where
   (==) x y = show x == show y
@@ -530,7 +547,7 @@ data Tactic = Trivial
             | Solve Expr
             -- only for more nicely structured output
             | Subgoal [Tactic]
-            | Exact Expr deriving Data
+            | Refine Expr deriving Data
 
 simplInduction arg var hyp = Induction arg var hyp [var, hyp]
 
@@ -568,7 +585,7 @@ instance Show Tactic where
   show (Intros ns) = "intros " ++ unwords ns++". "
   show (Revert ns) = "revert " ++ unwords ns++". "
   show (Now t) = "smt_now " ++ show t -- for better debugging: show t++show (Try Trivial)
-  show (Exact x) = "unshelve refine "++ addParens (show x)++". "
+  show (Refine x) = "unshelve refine "++ addParens (show x)++". "
   show (Subgoal tacs) = "\n    { "++intercalate "" (map show tacs)++"}"
 
 showNoDot :: Tactic -> String
